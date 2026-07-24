@@ -1,0 +1,8 @@
+[Unit]
+Description=Restart Vietnam History AI when a newer RAG revision is idle
+After=history-chatbot-ai.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h
+ExecStart=/usr/bin/bash %h/Documents/Đồ\x20Án/Code/History-Chatbot/auto-restart-ai.sh

@@ -1,0 +1,12 @@
+[Unit]
+Description=Check for an idle Vietnam History AI revision update
+
+[Timer]
+OnBootSec=1min
+OnUnitActiveSec=30s
+AccuracySec=5s
+Persistent=true
+Unit=history-chatbot-ai-update.service
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,19 @@
+[Unit]
+Description=Vietnam History AI FastAPI backend
+Documentation=http://127.0.0.1:8000/docs
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h
+ExecStart=/usr/bin/bash %h/Documents/Đồ\x20Án/Code/History-Chatbot/start-ai.sh
+Environment=AI_HOST=127.0.0.1
+Environment=PYTHONUNBUFFERED=1
+Restart=on-failure
+RestartSec=5
+TimeoutStartSec=180
+TimeoutStopSec=30
+
+[Install]
+WantedBy=default.target

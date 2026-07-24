@@ -1,162 +1,150 @@
-# Hệ thống học Lịch sử Việt Nam bằng Hybrid GraphRAG
+# Vietnam History AI — PDF GraphRAG
 
-## 1. Giới thiệu dự án
+Backend FastAPI dùng chung cho app mobile và web-admin. Đây là pipeline tri thức
+duy nhất của hệ thống:
 
-Đây là project xây dựng chatbot hỗ trợ học tập và tra cứu kiến thức Lịch sử Việt Nam. Hệ thống cho phép người dùng nhập câu hỏi bằng ngôn ngữ tự nhiên, sau đó trả lời dựa trên dữ liệu lịch sử đã được xử lý từ tài liệu văn bản, PDF và đồ thị tri thức.
-
-Dự án sử dụng mô hình Hybrid GraphRAG, kết hợp hai hướng truy xuất dữ liệu:
-
-- **Vector Search**: tìm các đoạn văn bản lịch sử có nội dung gần nghĩa với câu hỏi của người dùng.
-- **Knowledge Graph**: truy vấn các thực thể và mối quan hệ lịch sử trong Neo4j bằng Cypher.
-
-Nhờ sự kết hợp này, hệ thống có thể vừa khai thác ngữ cảnh từ văn bản, vừa phân tích được quan hệ giữa các nhân vật, sự kiện, tổ chức và địa danh lịch sử.
-
-Các thành phần chính của project:
-
-- `src/app.py`: giao diện web bằng Streamlit và luồng xử lý hỏi đáp chính.
-- `src/chatbot.py`: phiên bản chatbot chạy trên terminal.
-- `scripts/`: các script phục vụ xử lý dữ liệu, trích xuất đồ thị, import dữ liệu vào Neo4j và tạo vector index.
-- `data/`: chứa dữ liệu thô, dữ liệu đã chia chunk và dữ liệu đồ thị đã trích xuất.
-- `requirements.txt`: danh sách thư viện Python cần cài đặt.
-
-Công nghệ sử dụng:
-
-- Python
-- Streamlit
-- Neo4j
-- LangChain
-- OpenAI Chat Model
-- OpenAI Embeddings
-- Neo4j Vector Index
-
-## 2. Hướng dẫn cài đặt và chạy chương trình
-
-### 2.1. Yêu cầu môi trường
-
-Trước khi chạy chương trình, cần cài đặt:
-
-- Python 3.10 trở lên
-- Neo4j
-- Tài khoản/API key OpenAI
-- Git hoặc công cụ tải mã nguồn project
-
-### 2.2. Cài đặt thư viện
-
-Mở terminal tại thư mục gốc của project:
-
-```bash
-cd D:\HistoryChatbot
+```text
+Upload PDF
+  → đọc text / OCR
+  → làm sạch và tách theo trang
+  → chia AIChunk
+  → OpenAI embedding
+  → OpenAI trích Entity + relationship
+  → lưu Neo4j
+  → hybrid retrieval + trả lời có nguồn
 ```
 
-Tạo môi trường ảo:
+## Thành phần
+
+- `SourceCode/src/api/main.py`: API, job Index nền và endpoint quản trị.
+- `SourceCode/src/api/pdf_ingestion.py`: đọc PDF, OCR và chia chunk.
+- `SourceCode/src/api/graph_extraction.py`: OpenAI Structured Outputs cho entity
+  và relationship.
+- `SourceCode/src/api/neo4j_repository.py`: schema, lưu graph, tìm kiếm và usage log.
+- `SourceCode/src/api/rag_service.py`: embedding, hybrid retrieval, rerank và chat.
+- `SourceCode/tests/`: kiểm thử chuẩn hoá entity, retrieval và serialization Neo4j.
+
+Các script import JSON, Gemini, Streamlit và chatbot terminal cũ đã được gỡ bỏ.
+Firestore chỉ giữ metadata/trạng thái PDF; Neo4j chỉ được cập nhật bởi backend này.
+
+## Cài đặt
 
 ```bash
-python -m venv .venv
+python3 -m venv .venv
+.venv/bin/pip install -r SourceCode/requirements.txt
+cp SourceCode/.env.example SourceCode/.env
 ```
 
-Kích hoạt môi trường ảo trên Windows:
-
-```bash
-.venv\Scripts\activate
-```
-
-Cài đặt các thư viện cần thiết:
-
-```bash
-pip install -r requirements.txt
-```
-
-### 2.3. Cấu hình biến môi trường
-
-Tạo file `.env` ở thư mục gốc của project và thêm các biến sau:
+Các biến quan trọng:
 
 ```env
-NEO4J_URI=bolt://localhost:7687
-NEO4J_USERNAME=neo4j
-NEO4J_PASSWORD=your_neo4j_password
-OPENAI_API_KEY=your_openai_api_key
+OPENAI_API_KEY=
 OPENAI_CHAT_MODEL=gpt-5.4-mini
+OPENAI_EMBEDDING_MODEL=text-embedding-3-small
+OPENAI_ENTITY_MODEL=gpt-5.4-nano
+AI_PIPELINE_VERSION=pdf-openai-v2
+
+NEO4J_URI=
+NEO4J_USERNAME=
+NEO4J_PASSWORD=
+NEO4J_DATABASE=neo4j
+
+AI_ADMIN_API_KEY=
 ```
 
-Trong đó:
+`AI_PIPELINE_VERSION` quyết định khả năng tái sử dụng kết quả. Nếu PDF,
+embedding model, entity model và version không đổi, lần Index lại dùng lại
+embedding/entity theo `contentHash`, không gọi OpenAI lại cho chunk đó.
 
-- `NEO4J_URI`: địa chỉ kết nối đến Neo4j.
-- `NEO4J_USERNAME`: tên đăng nhập Neo4j.
-- `NEO4J_PASSWORD`: mật khẩu Neo4j.
-- `OPENAI_API_KEY`: API key dùng để gọi mô hình AI và tạo embedding.
-- `OPENAI_CHAT_MODEL`: model dùng để sinh câu trả lời, ví dụ `gpt-5.4-mini` hoặc `gpt-5.5`.
+## Chạy
 
-### 2.4. Chuẩn bị dữ liệu cho Neo4j
-
-Nếu Neo4j chưa có dữ liệu, cần import dữ liệu đồ thị và vector vào database.
-
-Import dữ liệu đồ thị:
+Từ thư mục gốc:
 
 ```bash
-python scripts/import_to_neo4j.py
+./start-ai.sh
 ```
 
-Import dữ liệu vector:
+Hoặc:
 
 ```bash
-python scripts/import_vectors.py
+cd SourceCode
+../.venv/bin/uvicorn src.api.main:app --host 0.0.0.0 --port 8000
 ```
 
-Lưu ý: trước khi chạy các script trên, cần đảm bảo Neo4j đang hoạt động và file `.env` đã được cấu hình đúng.
+- Swagger: `http://localhost:8000/docs`
+- Health: `http://localhost:8000/health`
+- Android Emulator: `http://10.0.2.2:8000`
 
-### 2.5. Chạy giao diện web
+### Tự nạp revision RAG mới khi hệ thống rảnh
 
-Sau khi cài đặt và cấu hình xong, chạy ứng dụng Streamlit:
+Chạy một lần để cài FastAPI service và timer theo dõi revision:
 
 ```bash
-streamlit run src/app.py
+./install-ai-service.sh
 ```
 
-Khi chạy thành công, Streamlit sẽ mở ứng dụng tại địa chỉ:
-
-```text
-http://localhost:8501
-```
-
-Người dùng có thể nhập câu hỏi lịch sử vào ô chat để hệ thống truy xuất dữ liệu và sinh câu trả lời.
-
-### 2.6. Chạy chatbot trên terminal
-
-Ngoài giao diện web, có thể chạy chatbot trực tiếp trên terminal:
+Timer kiểm tra mỗi 30 giây. Khi code yêu cầu một `RAG_REVISION` mới, nó chỉ
+restart FastAPI sau khi không còn job Index ở trạng thái
+`queued/running/stopping`, không còn request Chat đang xử lý và trạng thái rảnh
+được giữ ít nhất 45 giây. Kiểm tra bằng:
 
 ```bash
-python src/chatbot.py
+systemctl --user status history-chatbot-ai-update.timer
+./check-ai.sh
 ```
 
-Để thoát khỏi chatbot terminal, nhập một trong các lệnh:
+Revision hiện hành được trả trong `/health` qua trường `rag_revision`.
 
-```text
-thoat
-exit
-quit
-```
+## Luồng Index và token
 
-### 2.7. Một số lỗi thường gặp
+Khi quản trị viên bấm **Index**:
 
-Nếu không kết nối được Neo4j:
+1. Backend đọc PDF; nếu không có text thì dùng OCRmyPDF hoặc
+   Poppler + Tesseract.
+2. Nội dung được làm sạch, tách theo trang và chia `AIChunk`.
+3. `text-embedding-3-small` tạo vector cho chunk mới hoặc đã thay đổi.
+4. `gpt-5.4-nano` trích các loại entity:
+   `PERSON`, `LOCATION`, `ORGANIZATION`, `EVENT`, `PERIOD`, `DOCUMENT`,
+   `STATE`, `WEAPON`.
+5. Bộ resolver hợp nhất alias đã kiểm chứng, loại ngày/số lượng/mention chung,
+   đồng thời giữ `surfaceForms` theo từng chunk để truy vết cách viết gốc.
+6. Backend chỉ giữ quan hệ thuộc ontology cố định và có hai đầu entity hợp lệ;
+   predicate gốc được lưu trong `rawPredicate`.
+7. Một transaction thay thế dữ liệu của PDF trong Neo4j:
+   `KnowledgeSource → KnowledgePage → AIChunk → Entity`.
+8. `AIUsageLog` lưu model, input/output token, số chunk gọi OpenAI, số chunk
+   tái sử dụng, số entity và số relationship.
 
-- Kiểm tra Neo4j đã chạy chưa.
-- Kiểm tra lại `NEO4J_URI`, `NEO4J_USERNAME`, `NEO4J_PASSWORD`.
+Web-admin hiển thị token của lần Index gần nhất trong **Kho tri thức PDF** và
+tổng token Index trong **Quản lý Graph**. Dashboard OpenAI vẫn là nguồn đối
+soát chi phí chính thức.
 
-Nếu lỗi khi gọi OpenAI:
+Index lần đầu cho các PDF cũ sẽ tạo lại entity/relationship và phát sinh token.
+Hệ thống không tự chạy hàng loạt; quản trị viên chủ động bấm Index cho từng PDF.
 
-- Kiểm tra `OPENAI_API_KEY`.
-- Kiểm tra kết nối mạng.
-- Kiểm tra hạn mức tài khoản OpenAI.
+## Bổ sung facet cho chunk đã Index
 
-Nếu thiếu thư viện:
+Pipeline gắn facet lịch sử (chính trị, kinh tế, văn hóa, xã hội, mục tiêu/hệ quả,
+diễn biến...) ngay khi tạo chunk. Với dữ liệu đã Index trước khi có cơ chế này,
+có thể cập nhật metadata trực tiếp từ nội dung đang lưu trong Neo4j:
 
 ```bash
-pip install -r requirements.txt
+cd SourceCode
+../.venv/bin/python scripts/backfill_chunk_facets.py --dry-run
+../.venv/bin/python scripts/backfill_chunk_facets.py
 ```
 
-Nếu Streamlit không chạy:
+Backfill chỉ chạy bộ quy tắc cục bộ và cập nhật thuộc tính `facets` của
+`AIChunk`; không tạo embedding, không gọi model OpenAI và không tốn token.
+
+## Kiểm thử
 
 ```bash
-python -m streamlit run src/app.py
+PYTHONPATH=SourceCode .venv/bin/python -m unittest discover -s SourceCode/tests -v
 ```
+
+## Tài liệu
+
+- [Báo cáo cải tiến truy xuất tên riêng](BAO_CAO_CAI_TIEN_TRUY_XUAT_TEN_RIENG.md)
+- [Báo cáo Comparison Planner ba tầng v22](BAO_CAO_COMPARISON_PLANNER_V22.md)
+- [Báo cáo Evidence-Verified Evolution Planner F9 v25](BAO_CAO_EVIDENCE_VERIFIED_EVOLUTION_F9_V25.md)
