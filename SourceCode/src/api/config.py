@@ -40,6 +40,13 @@ class Settings(BaseSettings):
     ai_enable_rerank: bool = True
     ai_enable_entity_extraction: bool = True
     ai_entity_batch_size: int = 6
+    # Published, administrator-reviewed history content is a second grounded
+    # corpus beside PDF/Neo4j.  The local path is useful in the monorepo; a
+    # deployed backend falls back to the immutable Firebase Hosting manifest.
+    ai_published_content_enabled: bool = True
+    ai_published_content_manifest_path: str = ""
+    ai_published_content_manifest_url: str = ""
+    ai_published_content_cache_ttl_seconds: int = 300
     ai_index_checkpoint_path: str = str(
         SOURCE_CODE_DIR / ".data" / "index-checkpoints.sqlite3"
     )
@@ -53,6 +60,16 @@ class Settings(BaseSettings):
     @property
     def cors_origins(self) -> list[str]:
         return [origin.strip() for origin in self.ai_cors_origins.split(",") if origin.strip()]
+
+    @property
+    def published_content_manifest_url(self) -> str:
+        configured = self.ai_published_content_manifest_url.strip()
+        if configured:
+            return configured
+        return (
+            f"https://{self.firebase_project_id}.web.app/"
+            "content/manifest.json"
+        )
 
 
 @lru_cache

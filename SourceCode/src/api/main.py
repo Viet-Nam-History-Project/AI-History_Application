@@ -10,8 +10,9 @@ from uuid import uuid4
 from fastapi import Body, Depends, FastAPI, File, Form, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 
+from .ai_errors import ai_service_http_exception
 from .auth import require_admin_key, require_firebase_user
-from .config import get_settings
+from .config import SOURCE_CODE_DIR, get_settings
 from .graph_extraction import (
     ChunkGraphExtraction,
     ExtractedEntity,
@@ -45,12 +46,36 @@ from .rag_service import (
     RagService,
     effective_answer_planning_instruction,
 )
-from .runtime_revision import RAG_REVISION
+from .runtime_revision import RAG_REVISION, rag_restart_required, source_rag_revision
+from .rag.retrieval.published_content_repository import (
+    CompositeKnowledgeRepository,
+    PublishedContentRepository,
+)
 
 
 settings = get_settings()
 repository = Neo4jKnowledgeRepository()
-rag_service = RagService(repository)
+_default_published_manifest = (
+    SOURCE_CODE_DIR.parent.parent
+    / "Web-Admin-for-managing-History-App"
+    / "public"
+    / "content"
+    / "manifest.json"
+)
+published_content_repository = PublishedContentRepository(
+    enabled=settings.ai_published_content_enabled,
+    manifest_path=(
+        settings.ai_published_content_manifest_path.strip()
+        or str(_default_published_manifest)
+    ),
+    manifest_url=settings.published_content_manifest_url,
+    cache_ttl_seconds=settings.ai_published_content_cache_ttl_seconds,
+)
+rag_repository = CompositeKnowledgeRepository(
+    repository,
+    published_content_repository,
+)
+rag_service = RagService(rag_repository)
 graph_extraction_service = PdfGraphExtractionService(
     rag_service.client,
     settings.openai_entity_model,
@@ -587,6 +612,8 @@ def health() -> HealthResponse:
             neo4j="connected",
             model=settings.openai_chat_model,
             rag_revision=RAG_REVISION,
+            source_rag_revision=source_rag_revision(),
+            restart_required=rag_restart_required(),
             active_chat_requests=chat_count,
             active_index_jobs=checkpoint_store.active_job_count(),
             indexed_sources=stats["sources"],
@@ -604,6 +631,8 @@ def revision_health() -> RevisionHealthResponse:
         chat_count = active_chat_requests
     return RevisionHealthResponse(
         rag_revision=RAG_REVISION,
+        source_rag_revision=source_rag_revision(),
+        restart_required=rag_restart_required(),
         active_chat_requests=chat_count,
         active_index_jobs=checkpoint_store.active_job_count(),
     )
@@ -620,7 +649,10 @@ def chat(
     try:
         return rag_service.answer(request, str(user.get("uid") or user.get("sub") or ""))
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Không thể tạo câu trả lời: {exc}") from exc
+        raise ai_service_http_exception(
+            exc,
+            fallback_detail="Không thể tạo câu trả lời do lỗi nội bộ của AI backend.",
+        ) from exc
     finally:
         with active_chat_lock:
             active_chat_requests = max(0, active_chat_requests - 1)
@@ -904,7 +936,13 @@ def debug_retrieval(
     request: ChatRequest,
     _: None = Depends(require_admin_key),
 ) -> ChatResponse:
-    return rag_service.answer(request, "admin-evaluation")
+    try:
+        return rag_service.answer(request, "admin-evaluation")
+    except Exception as exc:
+        raise ai_service_http_exception(
+            exc,
+            fallback_detail="AI backend không thể hoàn tất ca kiểm thử.",
+        ) from exc
 
 
 @app.get("/v1/admin/query-insights")

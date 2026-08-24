@@ -1,0 +1,99 @@
+[
+  {
+    "id": "direct-french-invasion",
+    "mode": "direct_fact",
+    "question": "Thực dân Pháp bắt đầu xâm lược Việt Nam ở đâu, vào thời gian nào?",
+    "requiredConcepts": [["Đà Nẵng"], ["1/9/1858", "1-9-1858"]],
+    "minimumRequirements": 2
+  },
+  {
+    "id": "direct-dong-khoi",
+    "mode": "direct_fact",
+    "question": "Phong trào Đồng Khởi bùng nổ tiêu biểu ở đâu, vào thời gian nào?",
+    "requiredConcepts": [["Bến Tre"], ["17/1/1960", "17-1-1960"]],
+    "minimumRequirements": 2
+  },
+  {
+    "id": "direct-bach-dang",
+    "mode": "direct_fact",
+    "question": "Chiến thắng Bạch Đằng năm 938 do ai lãnh đạo?",
+    "requiredConcepts": [["Ngô Quyền"]],
+    "minimumRequirements": 1
+  },
+  {
+    "id": "explain-colonial-policy",
+    "mode": "explanatory_rag",
+    "question": "Các chính sách thuộc địa của Pháp ở Việt Nam gồm những gì?",
+    "requiredConcepts": [["chính trị", "cai trị"], ["kinh tế", "thuế"], ["xã hội", "giáo dục"]],
+    "minimumRequirements": 1
+  },
+  {
+    "id": "causal-august-revolution-speed",
+    "mode": "explanatory_rag",
+    "question": "Vì sao Cách mạng tháng Tám năm 1945 có thể thắng lợi nhanh chóng?",
+    "requiredConcepts": [
+      ["Nhật đầu hàng Đồng minh", "Nhật đầu hàng Đồng Minh"],
+      ["khoảng trống quyền lực", "thời cơ"],
+      ["Đảng", "lãnh đạo"],
+      ["quần chúng", "toàn dân"],
+      ["chuẩn bị lâu dài", "chuẩn bị từ trước"]
+    ],
+    "minimumRequirements": 2
+  },
+  {
+    "id": "participants-august-revolution",
+    "mode": "explanatory_rag",
+    "question": "Những lực lượng nào tham gia Cách mạng tháng Tám?",
+    "requiredConcepts": [
+      ["toàn dân", "quần chúng"],
+      ["công nhân"],
+      ["nông dân"],
+      ["tiểu tư sản", "trí thức"],
+      ["Việt Minh"],
+      ["lực lượng vũ trang", "tự vệ", "Giải phóng quân"]
+    ],
+    "minimumRequirements": 5
+  },
+  {
+    "id": "comparison-colonial-exploitation",
+    "mode": "comparison",
+    "question": "So sánh hai cuộc khai thác thuộc địa của Pháp.",
+    "requiredConcepts": [["lần thứ nhất"], ["lần thứ hai"], ["giống"], ["khác"]],
+    "minimumRequirements": 1
+  },
+  {
+    "id": "comparison-war-strategies",
+    "mode": "comparison",
+    "question": "So sánh chiến lược Chiến tranh đặc biệt và Chiến tranh cục bộ của Mỹ ở miền Nam Việt Nam.",
+    "requiredConcepts": [["Chiến tranh đặc biệt"], ["Chiến tranh cục bộ"], ["giống"], ["khác"]],
+    "minimumRequirements": 1
+  },
+  {
+    "id": "timeline-colonial-rule",
+    "mode": "timeline_evolution",
+    "question": "Chính sách cai trị của Pháp thay đổi như thế nào từ 1897 đến 1945?",
+    "requiredConcepts": [["1897"], ["1945"], ["thay đổi"], ["tiếp nối", "không đổi", "xuyên suốt"]],
+    "minimumRequirements": 1
+  },
+  {
+    "id": "multi-facet-dien-bien-phu",
+    "mode": "explanatory_rag",
+    "question": "Điện Biên Phủ diễn ra thế nào, ai chỉ huy, lực lượng nào tham gia và kết quả ra sao?",
+    "requiredConcepts": [["Võ Nguyên Giáp"], ["Him Lam", "A1"], ["De Castries"], ["kết quả", "tiêu diệt"]],
+    "minimumRequirements": 4
+  },
+  {
+    "id": "multi-facet-august-revolution",
+    "mode": "explanatory_rag",
+    "question": "Cách mạng tháng Tám năm 1945 diễn ra trong thời cơ nào, lực lượng nào tham gia, ai lãnh đạo, các địa phương trọng điểm giành chính quyền ra sao và kết quả là gì?",
+    "requiredConcepts": [["Nhật", "đầu hàng"], ["Việt Minh", "Đảng Cộng sản Đông Dương"], ["Hà Nội"], ["Huế"], ["Sài Gòn"], ["2/9/1945", "2-9-1945"]],
+    "minimumRequirements": 5
+  },
+  {
+    "id": "graph-result-geneva",
+    "mode": "graph_multihop",
+    "question": "Chiến thắng Điện Biên Phủ tác động như thế nào đến Hiệp định Genève?",
+    "requiredConcepts": [["Điện Biên Phủ"], ["Hiệp định Genève", "Hiệp định Giơnevơ"], ["buộc Pháp", "đàm phán", "ký"]],
+    "minimumRequirements": 1
+  }
+]

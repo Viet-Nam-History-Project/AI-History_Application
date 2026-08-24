@@ -7,7 +7,8 @@ ENV_FILE="$PROJECT_DIR/SourceCode/.env"
 PORT="${AI_PORT:-8000}"
 HOST="${AI_HOST:-0.0.0.0}"
 HEALTH_URL="http://127.0.0.1:${PORT}/health"
-EXPECTED_RAG_REVISION="recoverable-boundary-evolution-planning-f9-v28"
+REVISION_FILE="$PROJECT_DIR/SourceCode/src/api/rag_revision.txt"
+EXPECTED_RAG_REVISION="$(tr -d '\r\n' < "$REVISION_FILE")"
 
 if [[ ! -x "$VENV_UVICORN" ]]; then
   echo "Missing .venv. Create it and install SourceCode/requirements.txt first." >&2

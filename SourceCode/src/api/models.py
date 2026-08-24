@@ -36,6 +36,8 @@ class RetrievalDiagnostics(BaseModel):
     channels: list[str] = Field(default_factory=list)
     confidence_factors: dict[str, float] = Field(default_factory=dict)
     original_question: str = ""
+    standalone_question: str = ""
+    conversation_resolved: bool = False
     normalized_question: str = ""
     query_corrections: list[dict[str, str]] = Field(default_factory=list)
     rewrite_confidence: float = 1.0
@@ -46,37 +48,18 @@ class RetrievalDiagnostics(BaseModel):
     covered_facets: list[str] = Field(default_factory=list)
     missing_facets: list[str] = Field(default_factory=list)
     facet_coverage: dict[str, list[str]] = Field(default_factory=dict)
-    concrete_evidence_count: int = 0
-    concrete_facets: list[str] = Field(default_factory=list)
-    missing_concrete_facets: list[str] = Field(default_factory=list)
-    detail_coverage: float = 0.0
-    answer_structure: str = "direct"
-    comparison_intent: str = ""
-    comparison_domain: str = ""
-    comparison_subjects: list[str] = Field(default_factory=list)
-    comparison_object_types: list[str] = Field(default_factory=list)
-    explicit_facets: list[str] = Field(default_factory=list)
-    comparison_evidence: dict[str, dict[str, list[str]]] = Field(
+    requirement_statuses: dict[str, str] = Field(default_factory=dict)
+    requirement_evidence: dict[str, list[str]] = Field(default_factory=dict)
+    requirement_types: dict[str, str] = Field(default_factory=dict)
+    semantic_requirements: dict[str, dict[str, object]] = Field(
         default_factory=dict
     )
-    balanced_facets: list[str] = Field(default_factory=list)
-    missing_comparison_cells: list[str] = Field(default_factory=list)
-    answer_requirements: dict[str, bool] = Field(default_factory=dict)
-    evolution_intent: str = ""
-    evolution_domain: str = ""
-    evolution_subject_type: str = ""
-    evolution_periods: list[list[int]] = Field(default_factory=list)
-    evolution_period_labels: list[str] = Field(default_factory=list)
-    evolution_period_states: list[str] = Field(default_factory=list)
-    evolution_boundary_causes: list[str] = Field(default_factory=list)
-    evolution_boundary_years: list[int | None] = Field(default_factory=list)
-    evolution_boundary_actors: list[str] = Field(default_factory=list)
-    evolution_boundary_actions: list[str] = Field(default_factory=list)
-    evolution_boundary_excerpts: list[str] = Field(default_factory=list)
-    evolution_boundary_evidence_ids: list[str] = Field(default_factory=list)
-    evolution_subject_lifetime: list[int] = Field(default_factory=list)
-    evolution_range_mismatch: bool = False
-    evolution_range_resolution: str = ""
+    coverage_gate_outcome: str = ""
+    coverage_gate_limitations: list[str] = Field(default_factory=list)
+    claim_verification_status: str = "not_run"
+    checked_claim_count: int = 0
+    unsupported_high_risk_claims: list[str] = Field(default_factory=list)
+    answer_structure: str = "direct"
 
 
 class ChatResponse(BaseModel):
@@ -172,6 +155,8 @@ class HealthResponse(BaseModel):
     neo4j: str
     model: str
     rag_revision: str
+    source_rag_revision: str
+    restart_required: bool = False
     active_chat_requests: int = 0
     active_index_jobs: int = 0
     indexed_sources: int
@@ -182,5 +167,7 @@ class HealthResponse(BaseModel):
 class RevisionHealthResponse(BaseModel):
     status: str = "ready"
     rag_revision: str
+    source_rag_revision: str
+    restart_required: bool = False
     active_chat_requests: int = 0
     active_index_jobs: int = 0

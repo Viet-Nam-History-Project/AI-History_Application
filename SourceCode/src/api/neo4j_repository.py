@@ -998,6 +998,88 @@ class Neo4jKnowledgeRepository:
             ],
         }
 
+    def retrieve_subject_evidence(
+        self,
+        subjects: list[str],
+        *,
+        limit: int = 240,
+    ) -> list[dict[str, Any]]:
+        """Scan chunks that directly name a subject before local facet ranking.
+
+        Hybrid retrieval intentionally caps every channel. For a long book,
+        subject/entity hits ordered near the beginning can therefore hide later
+        phases of the same event. This bounded exact-subject scan gives the
+        service enough same-subject evidence to select phases and facets locally
+        without an extra model call.
+        """
+        phrases = list(dict.fromkeys(
+            phrase.strip()
+            for phrase in subjects
+            if phrase and phrase.strip()
+        ))
+        if not phrases:
+            return []
+        search_query = " OR ".join(
+            self._exact_phrase_query(phrase) for phrase in phrases
+        )
+        bounded_limit = max(20, min(int(limit), 320))
+        scan_limit = max(200, min(1600, bounded_limit * 5))
+        with self.driver.session(database=self.database) as session:
+            records = session.run(
+                f"""
+                CALL db.index.fulltext.queryNodes(
+                  'ai_chunk_fulltext', $searchQuery, {{limit: $scanLimit}}
+                )
+                YIELD node, score
+                MATCH (source:KnowledgeSource)
+                WHERE (source)-[:HAS_CHUNK]->(node)
+                   OR EXISTS {{
+                     MATCH (source)-[:HAS_PAGE]->(:KnowledgePage)
+                           -[:HAS_CHUNK]->(node)
+                   }}
+                WITH DISTINCT source, node, score
+                WHERE coalesce(node.active, true) = true
+                  AND coalesce(source.active, true) = true
+                  AND any(
+                    phrase IN $phrases
+                    WHERE toLower(
+                      coalesce(node.heading, '') + ' ' + coalesce(node.text, '')
+                    ) CONTAINS toLower(phrase)
+                  )
+                OPTIONAL MATCH (node)-[:MENTIONS]->
+                               (entity:Entity {{pipeline: 'pdf'}})
+                RETURN {self._result_projection()}
+                ORDER BY node.sequence
+                LIMIT $limit
+                """,
+                searchQuery=search_query,
+                scanLimit=scan_limit,
+                phrases=phrases,
+                limit=bounded_limit,
+            )
+            items = []
+            for record in records:
+                item = record.data()
+                item["subjectScanScore"] = float(item.get("score") or 0)
+                # Neo4j full-text scores are unbounded and cannot be mixed
+                # directly with the normalized hybrid score used by the
+                # service. Exact subject membership is already guaranteed;
+                # local facet quality decides the order.
+                item["score"] = 0.5
+                item["channels"] = ["subject_scan"]
+                item["matchedPhrases"] = [
+                    phrase
+                    for phrase in phrases
+                    if phrase.casefold() in (
+                        f"{item.get('heading') or ''} "
+                        f"{item.get('text') or ''}"
+                    ).casefold()
+                ]
+                item["directEvidence"] = True
+                item["entityMatch"] = True
+                items.append(item)
+            return items
+
     def retrieve_timeline_windows(
         self,
         question: str,

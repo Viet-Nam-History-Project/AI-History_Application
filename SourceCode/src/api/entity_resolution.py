@@ -46,6 +46,13 @@ CURATED_ENTITY_ALIASES: dict[str, dict[str, tuple[str, ...]]] = {
         ),
     },
     "EVENT": {
+        "Phong trào Đồng Khởi": (
+            "Đồng Khởi",
+            "Cuộc Đồng Khởi",
+            "Cuộc đồng khởi",
+            "Phong trào Đồng khởi",
+            "Đồng Khởi Bến Tre",
+        ),
         "Chiến dịch Điện Biên Phủ": (
             "Chiến thắng Điện Biên Phủ",
             "Điện Biên Phủ",

@@ -21,7 +21,20 @@ Upload PDF
 - `SourceCode/src/api/graph_extraction.py`: OpenAI Structured Outputs cho entity
   và relationship.
 - `SourceCode/src/api/neo4j_repository.py`: schema, lưu graph, tìm kiếm và usage log.
-- `SourceCode/src/api/rag_service.py`: embedding, hybrid retrieval, rerank và chat.
+- `SourceCode/src/api/rag_service.py`: lớp tương thích và điều phối retrieval
+  trong giai đoạn chuyển đổi.
+- `SourceCode/src/api/rag/planning/`: phân rã trực tiếp câu hỏi thành các
+  requirement nguyên tử; facet cũ chỉ là lớp tương thích.
+- `SourceCode/src/api/rag/retrieval/`: lập truy vấn bù theo cụm field và giới
+  hạn budget.
+- `SourceCode/src/api/rag/evidence/`: kiểm định field hai tầng, ràng buộc chủ
+  thể/vai trò và dựng Evidence Ledger.
+- `SourceCode/src/api/rag/generation/`: sinh JSON claim–evidence nội bộ rồi
+  render Markdown cho App/Web.
+- `SourceCode/src/api/rag/verification/`: kiểm tra số liệu theo
+  subject/predicate và loại claim không được hỗ trợ.
+- `SourceCode/src/api/rag/orchestration/`: các use case điều phối từng giai
+  đoạn; xem sơ đồ tại `SourceCode/src/api/rag/README.md`.
 - `SourceCode/tests/`: kiểm thử chuẩn hoá entity, retrieval và serialization Neo4j.
 
 Các script import JSON, Gemini, Streamlit và chatbot terminal cũ đã được gỡ bỏ.
@@ -50,11 +63,24 @@ NEO4J_PASSWORD=
 NEO4J_DATABASE=neo4j
 
 AI_ADMIN_API_KEY=
+
+# Kho JSON lịch sử đã được Admin duyệt và xuất bản qua Firebase Hosting.
+AI_PUBLISHED_CONTENT_ENABLED=true
+AI_PUBLISHED_CONTENT_MANIFEST_PATH=
+AI_PUBLISHED_CONTENT_MANIFEST_URL=
+AI_PUBLISHED_CONTENT_CACHE_TTL_SECONDS=300
 ```
 
 `AI_PIPELINE_VERSION` quyết định khả năng tái sử dụng kết quả. Nếu PDF,
 embedding model, entity model và version không đổi, lần Index lại dùng lại
 embedding/entity theo `contentHash`, không gọi OpenAI lại cho chunk đó.
+
+Chatbot truy xuất đồng thời hai kho có kiểm soát: PDF đã index trong Neo4j và
+JSON lịch sử đã xuất bản. JSON chỉ được đọc qua `content/manifest.json`; backend
+kiểm tra SHA-256 trước khi dùng, tự làm mới theo TTL và giữ snapshot hợp lệ gần
+nhất nếu Hosting tạm thời không truy cập được. Cơ chế này giúp những sự kiện đã
+có trên App (ví dụ giai đoạn chưa có PDF tương ứng) vẫn trở thành bằng chứng
+RAG mà không hardcode dữ kiện trong mã nguồn.
 
 ## Chạy
 
@@ -83,7 +109,8 @@ Chạy một lần để cài FastAPI service và timer theo dõi revision:
 ./install-ai-service.sh
 ```
 
-Timer kiểm tra mỗi 30 giây. Khi code yêu cầu một `RAG_REVISION` mới, nó chỉ
+Timer kiểm tra mỗi 30 giây. Revision được đọc từ nguồn duy nhất
+`SourceCode/src/api/rag_revision.txt`. Khi code yêu cầu một revision mới, timer chỉ
 restart FastAPI sau khi không còn job Index ở trạng thái
 `queued/running/stopping`, không còn request Chat đang xử lý và trạng thái rảnh
 được giữ ít nhất 45 giây. Kiểm tra bằng:
@@ -93,7 +120,9 @@ systemctl --user status history-chatbot-ai-update.timer
 ./check-ai.sh
 ```
 
-Revision hiện hành được trả trong `/health` qua trường `rag_revision`.
+Revision của tiến trình và revision trên ổ đĩa được trả trong `/health` qua
+`rag_revision`, `source_rag_revision` và `restart_required`. Web Admin đọc trực
+tiếp các trường này, không giữ một bản revision hardcode riêng.
 
 ## Luồng Index và token
 
@@ -148,3 +177,7 @@ PYTHONPATH=SourceCode .venv/bin/python -m unittest discover -s SourceCode/tests 
 - [Báo cáo cải tiến truy xuất tên riêng](BAO_CAO_CAI_TIEN_TRUY_XUAT_TEN_RIENG.md)
 - [Báo cáo Comparison Planner ba tầng v22](BAO_CAO_COMPARISON_PLANNER_V22.md)
 - [Báo cáo Evidence-Verified Evolution Planner F9 v25](BAO_CAO_EVIDENCE_VERIFIED_EVOLUTION_F9_V25.md)
+- [Báo cáo refactor RAG strict-corpus v29](BAO_CAO_RAG_REFACTOR_STRICT_CORPUS_V29.md)
+
+Báo cáo kiến trúc tổng hợp và lộ trình v30 được lưu tại `../BaoCao.md` trong
+workspace đồ án để dùng chung khi viết báo cáo hệ thống.

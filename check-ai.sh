@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PORT="${AI_PORT:-8000}"
 HEALTH_URL="http://127.0.0.1:${PORT}/health"
-EXPECTED_RAG_REVISION="recoverable-boundary-evolution-planning-f9-v28"
+REVISION_FILE="$PROJECT_DIR/SourceCode/src/api/rag_revision.txt"
+EXPECTED_RAG_REVISION="$(tr -d '\r\n' < "$REVISION_FILE")"
 
 if ! command -v curl >/dev/null 2>&1; then
   echo "curl is required to check the AI backend." >&2
