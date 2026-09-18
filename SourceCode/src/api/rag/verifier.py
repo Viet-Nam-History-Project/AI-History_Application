@@ -103,6 +103,12 @@ Không giữ mốc giờ/số liệu quá chi tiết nếu nó không cần đ�
 xuất hiện trong một đoạn không curated; có thể sửa bằng cách bỏ độ chính xác
 thừa thay vì loại cả câu trả lời.
 
+Kiểm tra chặt tính hợp thời: không chuyển thuật ngữ, văn kiện,
+chính sách, vũ khí, chức vụ hoặc kết quả của một giai đoạn sang
+giai đoạn khác. `yearStart/yearEnd` của evidence là một ràng buộc,
+không chỉ là gợi ý. Với requirement có nhiều time window, chỉ đánh
+dấu covered/repaired nếu câu trả lời thực sự đối chiếu đủ các phía.
+
 Khi viết `correctedAnswer`, giữ bố cục học tập hữu ích của draft nếu nội dung
 vẫn đúng. Dòng `Từ khóa ghi nhớ`, `Từ khóa đối chiếu` hoặc `Mạch ghi nhớ` chỉ
 được cô đọng các claim đã có căn cứ; không xóa chúng chỉ vì cách trình bày,
@@ -133,6 +139,14 @@ toàn bộ câu trả lời được hỗ trợ và không có vấn đề cần
 hãy trả `notes: []`; không ghi lời xác nhận tích cực vào trường này.
 
 Câu hỏi: {plan.standalone_question}
+Cửa sổ thời gian: {json.dumps({
+    'yearStart': plan.year_start,
+    'yearEnd': plan.year_end,
+    'timeWindows': [
+        {'id': item.id, 'start': item.start, 'end': item.end, 'label': item.label}
+        for item in plan.time_windows
+    ],
+}, ensure_ascii=False)}
 Câu trả lời: {generated.answer}
 Claims: {json.dumps(generated.claims, ensure_ascii=False)}
 Requirement draft chưa gắn claim: {json.dumps([
@@ -144,6 +158,7 @@ Requirements và evidence đã gán: {json.dumps([
         'id': item.id,
         'question': item.question,
         'required': item.required,
+        'timeWindowIds': list(item.time_window_ids),
         'evidenceIds': selection.requirement_evidence.get(item.id, []),
     }
     for item in plan.requirements

@@ -56,6 +56,7 @@ def main() -> int:
     parser.add_argument("--base-url", default="http://127.0.0.1:8000")
     parser.add_argument("--timeout", type=int, default=180)
     parser.add_argument("--limit", type=int, default=0)
+    parser.add_argument("--start", type=int, default=0)
     parser.add_argument(
         "--show-answer",
         action="store_true",
@@ -72,6 +73,8 @@ def main() -> int:
     if not admin_key:
         raise SystemExit("AI_ADMIN_API_KEY is missing")
     cases = json.loads(args.cases.read_text(encoding="utf-8"))
+    if args.start:
+        cases = cases[args.start:]
     if args.limit:
         cases = cases[: args.limit]
 
@@ -90,10 +93,22 @@ def main() -> int:
             )
             if not passed_concept
         ]
+        forbidden_hits = [
+            alternatives
+            for alternatives in case.get("forbiddenConcepts", [])
+            if any(_key(option) in answer_key for option in alternatives)
+        ]
         requirement_count = len(
             (result.get("retrieval") or {}).get("semantic_requirements") or {}
         )
-        passed = all(concept_checks) and requirement_count >= int(
+        confidence = float(result.get("confidence") or 0)
+        expected_mode = str(case.get("mode") or "")
+        actual_mode = str((result.get("retrieval") or {}).get("intent") or "")
+        mode_passed = not expected_mode or actual_mode == expected_mode
+        confidence_passed = confidence <= float(
+            case.get("maximumConfidence") or 1.0
+        )
+        passed = all(concept_checks) and not forbidden_hits and mode_passed and confidence_passed and requirement_count >= int(
             case.get("minimumRequirements") or 1
         )
         failures += int(not passed)
@@ -102,8 +117,12 @@ def main() -> int:
             "pass": passed,
             "concepts": f"{sum(concept_checks)}/{len(concept_checks)}",
             "missingConcepts": missing_concepts,
+            "forbiddenHits": forbidden_hits,
+            "mode": actual_mode,
+            "modePassed": mode_passed,
             "requirements": requirement_count,
-            "confidence": round(float(result.get("confidence") or 0), 3),
+            "confidence": round(confidence, 3),
+            "confidencePassed": confidence_passed,
             "verification": (result.get("retrieval") or {}).get(
                 "claim_verification_status"
             ),

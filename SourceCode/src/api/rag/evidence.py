@@ -83,6 +83,9 @@ class EvidenceTools:
         candidate_count = 0
         exact_count = 0
         per_query_ids: dict[str, list[str]] = {query: [] for query in queries}
+        per_window_ids: dict[str, list[str]] = {
+            window.id: [] for window in plan.time_windows
+        }
         for query, vector in zip(queries, embeddings.data, strict=True):
             result = self.repository.retrieve_hybrid(
                 query, vector.embedding, candidate_k,
@@ -98,6 +101,40 @@ class EvidenceTools:
                 if item is None:
                     continue
                 per_query_ids[query].append(item.id)
+                previous = records.get(item.id)
+                if previous is None or item.score > previous.score:
+                    records[item.id] = item
+
+        # Timeline/comparison questions need evidence from every requested
+        # period, not merely the globally highest vector matches.
+        timeline_retrieval = getattr(
+            self.repository, "retrieve_timeline_windows", None
+        )
+        if callable(timeline_retrieval) and plan.time_windows:
+            try:
+                timeline_records = timeline_retrieval(
+                    plan.standalone_question,
+                    [(window.start, window.end) for window in plan.time_windows],
+                    per_window=5,
+                )
+            except Exception:
+                timeline_records = []
+            if timeline_records:
+                channels.append("planned_time_windows")
+            window_by_range = {
+                (window.start, window.end): window.id
+                for window in plan.time_windows
+            }
+            for raw in timeline_records:
+                item = EvidenceItem.from_record(raw)
+                if item is None:
+                    continue
+                window_id = window_by_range.get((
+                    raw.get("timelineWindowStart"),
+                    raw.get("timelineWindowEnd"),
+                ))
+                if window_id:
+                    per_window_ids[window_id].append(item.id)
                 previous = records.get(item.id)
                 if previous is None or item.score > previous.score:
                     records[item.id] = item
@@ -182,6 +219,22 @@ class EvidenceTools:
                         records[item.id] = item
             channels.append("verified_fact_store")
 
+        # Remove only provably disjoint evidence. Undated chunks remain
+        # available for semantic inspection instead of being discarded.
+        temporal_filtered_ids: set[str] = set()
+        if plan.year_start is not None and plan.year_end is not None:
+            temporal_filtered_ids = {
+                item.id
+                for item in records.values()
+                if item.overlaps(plan.year_start, plan.year_end) is False
+            }
+            for item_id in temporal_filtered_ids:
+                records.pop(item_id, None)
+            for ids in per_query_ids.values():
+                ids[:] = [item_id for item_id in ids if item_id in records]
+            for ids in per_window_ids.values():
+                ids[:] = [item_id for item_id in ids if item_id in records]
+
         # Reserve room for reviewed fact records. A large PDF corpus can
         # otherwise crowd a directly relevant curated record out of the model
         # selection window with many broadly similar vector matches.
@@ -202,13 +255,21 @@ class EvidenceTools:
             if len(subject_detail) >= 16:
                 break
 
+        window_reserved: list[EvidenceItem] = []
+        window_seen = {*curated_ids, *subject_detail_seen}
+        for window in plan.time_windows:
+            for item_id in per_window_ids.get(window.id, [])[:5]:
+                if item_id in records and item_id not in window_seen:
+                    window_reserved.append(records[item_id])
+                    window_seen.add(item_id)
+
         # Preserve a small, independent evidence window for every semantic
         # retrieval query.  Without this, a broad summary query can fill all
         # 48 slots and crowd out the more specific query about roles,
         # contributions or a secondary facet.  This is query diversity, not a
         # domain-specific reranking rule.
         query_reserved: list[EvidenceItem] = []
-        reserved_ids = {*curated_ids, *subject_detail_seen}
+        reserved_ids = {*curated_ids, *subject_detail_seen, *window_seen}
         for query in queries:
             query_items = sorted(
                 (
@@ -228,13 +289,17 @@ class EvidenceTools:
             (item for item in all_items if item.id not in reserved_ids),
             key=lambda item: item.score,
             reverse=True,
-        )[: max(0, 48 - len(curated) - len(subject_detail) - len(query_reserved))]
-        ranked = [*curated, *subject_detail, *query_reserved, *narrative][:48]
+        )[: max(0, 48 - len(curated) - len(subject_detail) - len(window_reserved) - len(query_reserved))]
+        ranked = [
+            *curated, *subject_detail, *window_reserved, *query_reserved,
+            *narrative,
+        ][:48]
         return ranked, {
             "candidate_count": candidate_count,
             "channels": list(dict.fromkeys(channels)),
             "query_terms": list(dict.fromkeys(query_terms)),
             "exact_match_count": exact_count,
+            "temporal_filtered_count": len(temporal_filtered_ids),
         }
 
 
@@ -289,6 +354,13 @@ Không suy ra đáp án. Nếu chưa đủ thì để trống và đánh dấu m
 mâu thuẫn về cùng một quan hệ, ghi vào conflicts; ưu tiên dữ liệu đã kiểm duyệt
 và đoạn nói trực tiếp, cụ thể.
 
+Metadata `yearStart/yearEnd` của evidence là khoảng thời gian của đoạn.
+Không chọn evidence có khoảng năm tách rời phạm vi requirement. Với
+requirement gắn nhiều `timeWindowIds` (tiếp nối, thay đổi, so sánh),
+tập evidence phải có căn cứ cho từng cửa sổ; một phía không thể đại
+diện cho cả hai. Evidence không có metadata năm chỉ được chọn khi nội
+dung tự nó xác nhận đúng giai đoạn.
+
 Với yêu cầu nhân quả, đoạn chỉ nói chung rằng “thời cơ thuận lợi”, “chuẩn bị
 tốt” hoặc “lãnh đạo đúng” chưa đủ thay cho bằng chứng nêu cơ chế hay điều kiện
 cụ thể. Hãy chọn bằng chứng trực tiếp cho từng vai trò nhân quả mà planner đã
@@ -308,8 +380,16 @@ Kế hoạch: {json.dumps({
     'subject': plan.subject,
     'scope': plan.scope,
     'dateRange': plan.date_range,
+    'yearStart': plan.year_start,
+    'yearEnd': plan.year_end,
+    'timeWindows': [
+        {'id': window.id, 'start': window.start, 'end': window.end, 'label': window.label}
+        for window in plan.time_windows
+    ],
     'requirements': [r.__dict__ if hasattr(r, '__dict__') else {
         'id': r.id, 'question': r.question, 'answerType': r.answer_type,
+        'required': r.required,
+        'timeWindowIds': list(r.time_window_ids),
     } for r in plan.requirements],
 }, ensure_ascii=False)}
 
@@ -338,6 +418,9 @@ Kế hoạch: {json.dumps({
                 "conflicts": ["Không thể hoàn tất bước chọn bằng chứng."],
             }
         allowed_requirement_ids = {item.id for item in plan.requirements}
+        requirement_by_id = {item.id: item for item in plan.requirements}
+        window_by_id = {window.id: window for window in plan.time_windows}
+        evidence_by_id = {item.id: item for item in candidates}
         mapping: dict[str, list[str]] = {}
         selected: list[str] = []
         for row in parsed.get("requirementEvidence") or []:
@@ -348,6 +431,22 @@ Kế hoạch: {json.dumps({
                 continue
             ids = [str(item) for item in row.get("evidenceIds") or [] if str(item) in allowed_ids]
             ids = list(dict.fromkeys(ids))[:8]
+            requirement = requirement_by_id[requirement_id]
+            assigned_windows = [
+                window_by_id[window_id]
+                for window_id in requirement.time_window_ids
+                if window_id in window_by_id
+            ]
+            if assigned_windows:
+                ids = [
+                    item_id for item_id in ids
+                    if evidence_by_id[item_id].year_start is None
+                    or any(
+                        evidence_by_id[item_id].overlaps(window.start, window.end)
+                        is True
+                        for window in assigned_windows
+                    )
+                ]
             mapping[requirement_id] = ids
             selected.extend(ids)
         reported_missing = {
@@ -358,6 +457,22 @@ Kế hoạch: {json.dumps({
             requirement.id for requirement in plan.requirements
             if requirement.required and not mapping.get(requirement.id)
         }
+        # For a comparison/evolution requirement, dated evidence must cover
+        # every assigned side. Undated evidence is left to the semantic
+        # selector because its text may state the period explicitly.
+        for requirement in plan.requirements:
+            ids = mapping.get(requirement.id, [])
+            if not ids or not requirement.time_window_ids:
+                continue
+            selected_items = [evidence_by_id[item_id] for item_id in ids]
+            if any(item.year_start is None and item.year_end is None for item in selected_items):
+                continue
+            if any(
+                not any(item.overlaps(window_by_id[window_id].start, window_by_id[window_id].end) for item in selected_items)
+                for window_id in requirement.time_window_ids
+                if window_id in window_by_id
+            ):
+                computed_missing.add(requirement.id)
         return EvidenceSelection(
             evidence_ids=tuple(dict.fromkeys(selected))[:limit],
             requirement_evidence=mapping,

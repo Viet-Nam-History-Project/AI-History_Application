@@ -33,6 +33,8 @@ class RetrievalDiagnostics(BaseModel):
     query_terms: list[str] = Field(default_factory=list)
     primary_entity: str = ""
     exact_match_count: int = 0
+    temporal_filtered_count: int = 0
+    recovery_attempted: bool = False
     channels: list[str] = Field(default_factory=list)
     confidence_factors: dict[str, float] = Field(default_factory=dict)
     original_question: str = ""

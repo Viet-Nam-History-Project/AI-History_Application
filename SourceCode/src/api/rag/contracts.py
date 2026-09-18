@@ -53,6 +53,7 @@ class AtomicRequirement:
     question: str
     answer_type: str = "fact"
     required: bool = True
+    time_window_ids: tuple[str, ...] = ()
 
     @classmethod
     def from_dict(cls, value: dict[str, Any], index: int) -> "AtomicRequirement":
@@ -61,6 +62,35 @@ class AtomicRequirement:
             question=str(value.get("question") or "").strip(),
             answer_type=str(value.get("answerType") or "fact").strip(),
             required=bool(value.get("required", True)),
+            time_window_ids=tuple(dict.fromkeys(
+                str(item).strip()
+                for item in (value.get("timeWindowIds") or [])
+                if str(item).strip()
+            )),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class TimeWindow:
+    id: str
+    start: int
+    end: int
+    label: str = ""
+
+    @classmethod
+    def from_dict(cls, value: dict[str, Any], index: int) -> "TimeWindow | None":
+        try:
+            start = int(value.get("start"))
+            end = int(value.get("end"))
+        except (TypeError, ValueError):
+            return None
+        if start > end:
+            start, end = end, start
+        return cls(
+            id=str(value.get("id") or f"w{index + 1}").strip(),
+            start=start,
+            end=end,
+            label=str(value.get("label") or "").strip(),
         )
 
 
@@ -73,6 +103,9 @@ class UnifiedPlan:
     retrieval_queries: tuple[str, ...]
     scope: str = ""
     date_range: str = ""
+    year_start: int | None = None
+    year_end: int | None = None
+    time_windows: tuple[TimeWindow, ...] = ()
     output_style: str = "direct"
     requires_verification: bool = False
     ambiguity: str = ""
@@ -101,6 +134,30 @@ class UnifiedPlan:
             if str(item).strip()
         ))
         standalone = str(value.get("standaloneQuestion") or original).strip()
+        raw_windows = value.get("timeWindows")
+        raw_windows = raw_windows if isinstance(raw_windows, list) else []
+        time_windows = tuple(
+            window
+            for index, item in enumerate(raw_windows[:6])
+            if isinstance(item, dict)
+            for window in [TimeWindow.from_dict(item, index)]
+            if window is not None and window.id
+        )
+        year_start = value.get("yearStart")
+        year_end = value.get("yearEnd")
+        try:
+            year_start = int(year_start) if year_start is not None else None
+        except (TypeError, ValueError):
+            year_start = None
+        try:
+            year_end = int(year_end) if year_end is not None else None
+        except (TypeError, ValueError):
+            year_end = None
+        if year_start is not None and year_end is not None and year_start > year_end:
+            year_start, year_end = year_end, year_start
+        if time_windows:
+            year_start = min(window.start for window in time_windows)
+            year_end = max(window.end for window in time_windows)
         return cls(
             standalone_question=standalone,
             mode=mode,
@@ -109,6 +166,9 @@ class UnifiedPlan:
             retrieval_queries=queries or (standalone,),
             scope=str(value.get("scope") or "").strip(),
             date_range=str(value.get("dateRange") or "").strip(),
+            year_start=year_start,
+            year_end=year_end,
+            time_windows=time_windows,
             output_style=str(value.get("outputStyle") or "direct").strip(),
             requires_verification=bool(value.get("requiresVerification")),
             ambiguity=str(value.get("ambiguity") or "").strip(),
@@ -131,6 +191,8 @@ class EvidenceItem:
     trust_level: str = ""
     source_priority: int = 0
     curated: bool = False
+    year_start: int | None = None
+    year_end: int | None = None
 
     @classmethod
     def from_record(cls, value: dict[str, Any]) -> "EvidenceItem | None":
@@ -156,6 +218,21 @@ class EvidenceItem:
                 bool(value.get("directEvidence"))
                 or "published_content" in (value.get("channels") or [])
             ),
+            year_start=value.get("yearStart") if isinstance(value.get("yearStart"), int) else None,
+            year_end=value.get("yearEnd") if isinstance(value.get("yearEnd"), int) else None,
+        )
+
+    def overlaps(self, start: int, end: int) -> bool | None:
+        """Return temporal compatibility, or None when the item is undated."""
+        if self.year_start is None and self.year_end is None:
+            return None
+        item_start = self.year_start if self.year_start is not None else self.year_end
+        item_end = self.year_end if self.year_end is not None else self.year_start
+        return bool(
+            item_start is not None
+            and item_end is not None
+            and item_start <= end
+            and item_end >= start
         )
 
     def prompt_payload(self, max_chars: int = 1800) -> dict[str, Any]:
@@ -170,6 +247,8 @@ class EvidenceItem:
             "trustLevel": self.trust_level,
             "sourcePriority": self.source_priority,
             "curated": self.curated,
+            "yearStart": self.year_start,
+            "yearEnd": self.year_end,
         }
 
 

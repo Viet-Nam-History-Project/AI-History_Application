@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import time
+from dataclasses import replace
 from typing import Any, Callable
 
 from ..models import ChatRequest, ChatResponse, Citation, RetrievalDiagnostics
@@ -79,6 +80,14 @@ class GroundedRagPipeline:
             "insufficient": 0.25,
         }.get(verification.status, 0.25)
         confidence = max(0.0, min(1.0, 0.45 * coverage + 0.30 * retrieval + 0.25 * verification_score))
+        if selection.conflicts:
+            confidence = min(confidence, 0.60)
+        if verification.status == "corrected":
+            confidence = min(confidence, 0.80)
+        if verification.status == "insufficient":
+            confidence = min(confidence, 0.40)
+        if coverage < 1.0:
+            confidence = min(confidence, 0.65)
         return confidence, {
             "requirement_coverage": round(coverage, 4),
             "retrieval_quality": round(retrieval, 4),
@@ -98,6 +107,60 @@ class GroundedRagPipeline:
             candidates,
             limit=max(10, int(self.settings.ai_retrieval_top_k) + 8),
         )
+        recovery_attempted = False
+        missing_ids = set(selection.missing_requirements)
+        missing_requirements = tuple(
+            item for item in plan.requirements
+            if item.required and item.id in missing_ids
+        )
+        # One bounded recovery pass targets only requirements that the first
+        # selection could not support. Avoid retry chains and do not retry a
+        # selector outage/conflict.
+        if candidates and missing_requirements and not selection.conflicts:
+            recovery_attempted = True
+            recovery_queries = tuple(dict.fromkeys(
+                " ".join(filter(None, (plan.subject, item.question, plan.date_range))).strip()
+                for item in missing_requirements
+            ))
+            recovery_plan = replace(
+                plan,
+                standalone_question=recovery_queries[0],
+                requirements=missing_requirements,
+                retrieval_queries=recovery_queries,
+            )
+            recovered, recovery_diagnostics = self.tools.retrieve(
+                recovery_plan,
+                candidate_k=max(8, int(self.settings.ai_retrieval_candidate_k) // 2),
+            )
+            merged = {item.id: item for item in candidates}
+            for item in recovered:
+                previous = merged.get(item.id)
+                if previous is None or item.score > previous.score:
+                    merged[item.id] = item
+            candidates = list(merged.values())
+            selection = self.selector.select(
+                plan,
+                candidates,
+                limit=max(10, int(self.settings.ai_retrieval_top_k) + 8),
+            )
+            raw_diagnostics["candidate_count"] += int(
+                recovery_diagnostics.get("candidate_count") or 0
+            )
+            raw_diagnostics["exact_match_count"] += int(
+                recovery_diagnostics.get("exact_match_count") or 0
+            )
+            raw_diagnostics["temporal_filtered_count"] = int(
+                raw_diagnostics.get("temporal_filtered_count") or 0
+            ) + int(recovery_diagnostics.get("temporal_filtered_count") or 0)
+            raw_diagnostics["channels"] = list(dict.fromkeys([
+                *raw_diagnostics.get("channels", []),
+                *recovery_diagnostics.get("channels", []),
+                "single_gap_recovery",
+            ]))
+            raw_diagnostics["query_terms"] = list(dict.fromkeys([
+                *raw_diagnostics.get("query_terms", []),
+                *recovery_diagnostics.get("query_terms", []),
+            ]))
         selected = [item for item in candidates if item.id in set(selection.evidence_ids)]
 
         if selected:
@@ -141,6 +204,10 @@ class GroundedRagPipeline:
             query_terms=raw_diagnostics["query_terms"],
             primary_entity=plan.subject,
             exact_match_count=int(raw_diagnostics["exact_match_count"]),
+            temporal_filtered_count=int(
+                raw_diagnostics.get("temporal_filtered_count") or 0
+            ),
+            recovery_attempted=recovery_attempted,
             channels=raw_diagnostics["channels"],
             confidence_factors=confidence_factors,
             original_question=request.question,
@@ -157,6 +224,7 @@ class GroundedRagPipeline:
                     "label": item.question,
                     "answerType": item.answer_type,
                     "required": item.required,
+                    "timeWindowIds": list(item.time_window_ids),
                 }
                 for item in plan.requirements
             },
@@ -171,6 +239,15 @@ class GroundedRagPipeline:
             unsupported_high_risk_claims=list(verification.unsupported_claims),
             coverage_gate_limitations=[
                 *selection.conflicts,
+                *(
+                    [
+                        "Đã loại "
+                        f"{int(raw_diagnostics.get('temporal_filtered_count') or 0)} "
+                        "đoạn lệch ngoài phạm vi thời gian."
+                    ]
+                    if raw_diagnostics.get("temporal_filtered_count")
+                    else []
+                ),
                 *(verification.notes if verification.status != "supported" else ()),
                 *(
                     f"Chưa có đủ bằng chứng cho: {item.question}"

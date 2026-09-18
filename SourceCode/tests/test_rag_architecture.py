@@ -128,6 +128,40 @@ class _QueryDiversityRepository:
         ][:limit]
 
 
+class _TemporalRepository:
+    published = _Published()
+
+    @staticmethod
+    def retrieve_hybrid(_query, _embedding, _limit, **_kwargs):
+        return {
+            "items": [
+                {
+                    "id": "correct-period",
+                    "text": "Hỏa lực trong Chiến tranh cục bộ.",
+                    "yearStart": 1965,
+                    "yearEnd": 1968,
+                    "score": 0.8,
+                },
+                {
+                    "id": "wrong-period",
+                    "text": "Tên lửa TOW trong mùa hè 1972.",
+                    "yearStart": 1972,
+                    "yearEnd": 1972,
+                    "score": 0.99,
+                },
+                {
+                    "id": "undated",
+                    "text": "Đoạn không có metadata năm.",
+                    "score": 0.7,
+                },
+            ],
+            "candidateCount": 3,
+            "queryTerms": ["chiến tranh cục bộ"],
+            "exactMatchCount": 0,
+            "channels": ["vector"],
+        }
+
+
 PROMPTS = {
     "system": "Trợ lý lịch sử",
     "query_normalization": "Sửa lỗi rõ nghĩa",
@@ -138,6 +172,53 @@ PROMPTS = {
 
 
 class UnifiedRagArchitectureTest(unittest.TestCase):
+    def test_temporal_gate_removes_only_provably_disjoint_evidence(self):
+        tools = EvidenceTools(_Client([]), "embedding", _TemporalRepository())
+        plan = UnifiedPlan.from_dict({
+            "standaloneQuestion": "Hỏa lực Mỹ trong Chiến tranh cục bộ?",
+            "yearStart": 1965,
+            "yearEnd": 1968,
+            "requirements": [{
+                "id": "firepower", "question": "Hỏa lực thay đổi thế nào?",
+                "answerType": "timeline", "required": True,
+            }],
+        }, "question")
+
+        items, diagnostics = tools.retrieve(plan)
+
+        self.assertEqual(
+            {item.id for item in items},
+            {"correct-period", "undated"},
+        )
+        self.assertEqual(diagnostics["temporal_filtered_count"], 1)
+
+    def test_multi_window_requirement_needs_dated_evidence_from_each_side(self):
+        client = _Client([{
+            "requirementEvidence": [{
+                "requirementId": "change", "evidenceIds": ["before"],
+            }],
+            "missingRequirements": [],
+            "conflicts": [],
+        }])
+        selector = ModelEvidenceSelector(client, "model")
+        plan = UnifiedPlan.from_dict({
+            "standaloneQuestion": "Điểm thay đổi trước và sau năm 1968?",
+            "timeWindows": [
+                {"id": "before", "start": 1965, "end": 1968, "label": "Trước"},
+                {"id": "after", "start": 1969, "end": 1972, "label": "Sau"},
+            ],
+            "requirements": [{
+                "id": "change", "question": "Điểm thay đổi?",
+                "answerType": "comparison", "required": True,
+                "timeWindowIds": ["before", "after"],
+            }],
+        }, "question")
+        selected = selector.select(plan, [
+            EvidenceItem("before", "Giai đoạn trước", year_start=1965, year_end=1968),
+        ])
+
+        self.assertIn("change", selected.missing_requirements)
+
     def test_memory_anchor_guidance_adapts_to_answer_mode(self):
         direct = UnifiedPlan.from_dict({
             "standaloneQuestion": "Ai lãnh đạo?",

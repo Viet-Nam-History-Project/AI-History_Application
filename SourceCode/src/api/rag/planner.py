@@ -40,8 +40,14 @@ PLAN_SCHEMA = {
                             "question": {"type": "string"},
                             "answerType": {"type": "string"},
                             "required": {"type": "boolean"},
+                            "timeWindowIds": {
+                                "type": "array", "items": {"type": "string"},
+                            },
                         },
-                        "required": ["id", "question", "answerType", "required"],
+                        "required": [
+                            "id", "question", "answerType", "required",
+                            "timeWindowIds",
+                        ],
                     },
                 },
                 "retrievalQueries": {
@@ -50,6 +56,21 @@ PLAN_SCHEMA = {
                 },
                 "scope": {"type": "string"},
                 "dateRange": {"type": "string"},
+                "yearStart": {"type": ["integer", "null"]},
+                "yearEnd": {"type": ["integer", "null"]},
+                "timeWindows": {
+                    "type": "array", "maxItems": 6,
+                    "items": {
+                        "type": "object", "additionalProperties": False,
+                        "properties": {
+                            "id": {"type": "string"},
+                            "start": {"type": "integer"},
+                            "end": {"type": "integer"},
+                            "label": {"type": "string"},
+                        },
+                        "required": ["id", "start", "end", "label"],
+                    },
+                },
                 "outputStyle": {
                     "type": "string",
                     "enum": ["direct", "sections", "table", "timeline"],
@@ -60,7 +81,8 @@ PLAN_SCHEMA = {
             "required": [
                 "standaloneQuestion", "mode", "subject", "requirements",
                 "retrievalQueries", "scope", "dateRange", "outputStyle",
-                "requiresVerification", "ambiguity",
+                "yearStart", "yearEnd", "timeWindows", "requiresVerification",
+                "ambiguity",
             ],
         },
     },
@@ -131,6 +153,11 @@ NHIỆM VỤ:
   nghĩa, tên gọi khác, quan hệ cần tìm và giả thuyết truy xuất dựa
   trên tri thức của model. Giả thuyết chỉ dùng để tìm: tuyệt đối không
   coi nó là đáp án nếu corpus không xác nhận.
+- Chuẩn hóa phạm vi thời gian thành `yearStart`, `yearEnd`; nếu câu hỏi
+  không giới hạn thời gian thì trả null. Với so sánh/tiến trình qua
+  nhiều giai đoạn, tạo `timeWindows` riêng và gắn `timeWindowIds` cho
+  requirement. Yêu cầu về tiếp nối/thay đổi phải gắn tất cả cửa
+  sổ cần đối chiếu.
 - `requiresVerification=true` khi câu trả lời dự kiến chứa tên người, mốc ngày,
   số liệu, quan hệ nhân quả, so sánh, nhiều nguồn hoặc khả năng xung đột.
 - Chọn outputStyle theo bản chất câu hỏi, không theo một taxonomy nội dung cứng.
@@ -171,4 +198,7 @@ Câu hỏi hiện tại: {question}
                 }],
                 "retrievalQueries": [question],
                 "requiresVerification": verify,
+                "yearStart": None,
+                "yearEnd": None,
+                "timeWindows": [],
             }, question)

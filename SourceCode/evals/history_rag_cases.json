@@ -95,5 +95,37 @@
     "question": "Chiến thắng Điện Biên Phủ tác động như thế nào đến Hiệp định Genève?",
     "requiredConcepts": [["Điện Biên Phủ"], ["Hiệp định Genève", "Hiệp định Giơnevơ"], ["buộc Pháp", "đàm phán", "ký"]],
     "minimumRequirements": 1
+  },
+  {
+    "id": "temporal-local-war-firepower-1965-1968",
+    "mode": "timeline_evolution",
+    "question": "Khối lượng hỏa lực và vũ khí của quân đội Mỹ thay đổi quy mô như thế nào khi chuyển sang Chiến tranh cục bộ?",
+    "requiredConcepts": [["quân viễn chinh Mỹ", "quân đội Mỹ"], ["không quân", "hải quân", "pháo binh"]],
+    "forbiddenConcepts": [["TOW"], ["1969", "1970", "1972"], ["Việt Nam hóa chiến tranh"]],
+    "minimumRequirements": 2
+  },
+  {
+    "id": "temporal-political-platform-1930",
+    "mode": "timeline_evolution",
+    "question": "Cương lĩnh chính trị đầu tiên của Đảng đã tiếp nối và thay đổi chiến lược đấu tranh của giai cấp công nhân như thế nào?",
+    "requiredConcepts": [["công nhân"], ["công nông"], ["dân tộc", "độc lập"]],
+    "forbiddenConcepts": [["Hội nghị Trung ương 8", "Trung ương 8"], ["Việt Minh"], ["khởi nghĩa từng phần"]],
+    "minimumRequirements": 2
+  },
+  {
+    "id": "distinguish-contract-100-from-contract-10",
+    "mode": "explanatory_rag",
+    "question": "Cơ chế quản lý nông nghiệp bắt đầu có những bước thay đổi thử nghiệm thế nào khi áp dụng Chỉ thị 100 (Khoán 100)?",
+    "requiredConcepts": [["5 khâu"], ["3 khâu"], ["hợp tác xã"]],
+    "forbiddenConcepts": [["xóa bỏ công điểm", "xóa bỏ hạch toán công điểm"], ["tự chủ hoàn toàn"]],
+    "minimumRequirements": 2
+  },
+  {
+    "id": "anachronistic-term-party-congress-vi",
+    "mode": "timeline_evolution",
+    "question": "Văn kiện Đại hội Đảng lần thứ VI đánh dấu sự kiện Đổi Mới năm 1986 đã làm thay đổi mô hình kinh tế quốc dân như thế nào?",
+    "requiredConcepts": [["kế hoạch hóa tập trung", "quan liêu bao cấp"], ["nhiều thành phần"], ["ba chương trình kinh tế", "lương thực", "hàng tiêu dùng", "hàng xuất khẩu"]],
+    "forbiddenConcepts": [["kinh tế thị trường định hướng xã hội chủ nghĩa"]],
+    "minimumRequirements": 2
   }
 ]

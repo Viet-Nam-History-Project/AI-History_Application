@@ -146,6 +146,7 @@ class GroundedAnswerModel:
                 "question": item.question,
                 "answerType": item.answer_type,
                 "evidenceIds": selection.requirement_evidence.get(item.id, []),
+                "timeWindowIds": list(item.time_window_ids),
             }
             for item in plan.requirements
         ]
@@ -189,6 +190,9 @@ diễn biến, lực lượng và kết quả. Chỉ nêu mức chi tiết cần
 Tên người, ngày/giờ và số liệu quá cụ thể là dữ kiện rủi ro cao:
 không thêm độ chính xác không cần thiết từ một đoạn đơn lẻ; ưu tiên
 bản ghi curated, nguồn official hoặc chi tiết được nhiều đoạn xác nhận.
+Không gán thuật ngữ, chính sách, văn kiện, vũ khí hay kết quả của
+giai đoạn sau cho giai đoạn trước. Với câu tiếp nối/thay đổi,
+chỉ kết luận sau khi evidence bao phủ tất cả time window được gắn.
 
 Mỗi dữ kiện có thể kiểm chứng phải xuất hiện trong `claims`, gắn evidenceId và
 requirementIds mà claim thực sự trả lời.
@@ -197,6 +201,11 @@ Không dùng evidenceId ngoài danh sách cho phép.
 Câu hỏi: {plan.standalone_question}
 Mode: {plan.mode}
 Phong cách: {plan.output_style}
+Phạm vi năm: {plan.year_start} đến {plan.year_end}
+Time windows: {json.dumps([
+    {'id': item.id, 'start': item.start, 'end': item.end, 'label': item.label}
+    for item in plan.time_windows
+], ensure_ascii=False)}
 Các yêu cầu: {json.dumps(requirement_payload, ensure_ascii=False)}
 Yêu cầu chưa đủ dữ liệu (không viết vào answer): {json.dumps(selection.missing_requirements, ensure_ascii=False)}
 Bằng chứng: {json.dumps([item.prompt_payload(max_chars=2400) for item in selected], ensure_ascii=False)}

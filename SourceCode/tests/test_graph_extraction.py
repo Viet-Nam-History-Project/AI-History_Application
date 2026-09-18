@@ -76,7 +76,10 @@ class GraphExtractionNormalizationTest(unittest.TestCase):
         )
 
         names = {entity.name for entity in extraction.entities}
-        self.assertEqual(names, {"Nguyễn Thị Định", "Đồng khởi", "Bến Tre"})
+        self.assertEqual(
+            names,
+            {"Nguyễn Thị Định", "Phong trào Đồng Khởi", "Bến Tre"},
+        )
         self.assertEqual(len(extraction.relationships), 1)
         self.assertEqual(
             extraction.relationships[0].source_canonical_id,
@@ -84,7 +87,7 @@ class GraphExtractionNormalizationTest(unittest.TestCase):
         )
         self.assertEqual(
             extraction.relationships[0].target_canonical_id,
-            canonical_entity_id("Đồng khởi", "EVENT"),
+            canonical_entity_id("Phong trào Đồng Khởi", "EVENT"),
         )
         self.assertEqual(extraction.relationships[0].relationship_type, "LED")
         self.assertEqual(
