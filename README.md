@@ -42,10 +42,21 @@ Firestore chỉ giữ metadata/trạng thái PDF; Neo4j chỉ được cập nh�
 
 ## Cài đặt
 
+### Trên Linux / macOS
+
 ```bash
 python3 -m venv .venv
 .venv/bin/pip install -r SourceCode/requirements.txt
 cp SourceCode/.env.example SourceCode/.env
+```
+
+### Trên Windows (PowerShell / Command Prompt)
+
+```powershell
+python -m venv .venv
+.venv\Scripts\activate
+pip install -r SourceCode/requirements.txt
+Copy-Item SourceCode/.env.example SourceCode/.env
 ```
 
 Các biến quan trọng:
@@ -84,6 +95,8 @@ RAG mà không hardcode dữ kiện trong mã nguồn.
 
 ## Chạy
 
+### Trên Linux / macOS
+
 Từ thư mục gốc:
 
 ```bash
@@ -95,6 +108,16 @@ Hoặc:
 ```bash
 cd SourceCode
 ../.venv/bin/uvicorn src.api.main:app --host 0.0.0.0 --port 8000
+```
+
+### Trên Windows (PowerShell)
+
+Từ thư mục `SourceCode` sau khi kích hoạt môi trường ảo:
+
+```powershell
+cd SourceCode
+..\.venv\Scripts\activate
+python -m uvicorn src.api.main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
 - Swagger: `http://localhost:8000/docs`
@@ -168,16 +191,34 @@ Backfill chỉ chạy bộ quy tắc cục bộ và cập nhật thuộc tính `
 
 ## Kiểm thử
 
+### Trên Linux / macOS
+
 ```bash
 PYTHONPATH=SourceCode .venv/bin/python -m unittest discover -s SourceCode/tests -v
 ```
 
-## Tài liệu
+### Trên Windows (PowerShell)
 
-- [Báo cáo cải tiến truy xuất tên riêng](BAO_CAO_CAI_TIEN_TRUY_XUAT_TEN_RIENG.md)
-- [Báo cáo Comparison Planner ba tầng v22](BAO_CAO_COMPARISON_PLANNER_V22.md)
-- [Báo cáo Evidence-Verified Evolution Planner F9 v25](BAO_CAO_EVIDENCE_VERIFIED_EVOLUTION_F9_V25.md)
-- [Báo cáo refactor RAG strict-corpus v29](BAO_CAO_RAG_REFACTOR_STRICT_CORPUS_V29.md)
+```powershell
+$env:PYTHONPATH="SourceCode"; python -m unittest discover -s SourceCode/tests -v
+```
+
+## Tài liệu & Báo cáo kỹ thuật
+
+Danh mục các tài liệu kiến trúc và báo cáo thực nghiệm RAG đã triển khai:
+
+- **Tổng quan & Chuẩn hoá:**
+  - [Báo cáo refactor RAG strict-corpus v29](BAO_CAO_RAG_REFACTOR_STRICT_CORPUS_V29.md)
+  - [Báo cáo cải tiến truy xuất tên riêng](BAO_CAO_CAI_TIEN_TRUY_XUAT_TEN_RIENG.md)
+  - [Báo cáo cải tiến câu hỏi sự kiện nhiều ý M2](BAO_CAO_MULTI_FACET_EVENT_M2.md)
+  - [Báo cáo Comparison Planner ba tầng v22](BAO_CAO_COMPARISON_PLANNER_V22.md)
+- **Chuỗi cải tiến Evolution Planner F9 (Tiếp nối & thay đổi theo thời gian):**
+  - [Báo cáo Evolution Planner F9 v23](BAO_CAO_EVOLUTION_PLANNER_F9_V23.md)
+  - [Báo cáo Dynamic Evolution Planner F9 v24](BAO_CAO_DYNAMIC_EVOLUTION_PLANNER_F9_V24.md)
+  - [Báo cáo Evidence-Verified Evolution Planner F9 v25](BAO_CAO_EVIDENCE_VERIFIED_EVOLUTION_F9_V25.md)
+  - [Báo cáo cải tiến Timeline Coverage cho F9 v26](BAO_CAO_TIMELINE_COVERAGE_F9_V26.md)
+  - [Báo cáo sửa Range Verification F9 v27](BAO_CAO_RANGE_VERIFIED_F9_V27.md)
+  - [Báo cáo cải tiến F9 v28 – Ranh giới có thể phục hồi](BAO_CAO_RECOVERABLE_BOUNDARY_F9_V28.md)
 
 Báo cáo kiến trúc tổng hợp và lộ trình v30 được lưu tại `../BaoCao.md` trong
 workspace đồ án để dùng chung khi viết báo cáo hệ thống.
