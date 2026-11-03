@@ -1,3 +1,5 @@
+from typing import Any, Literal
+
 from pydantic import BaseModel, Field
 
 
@@ -21,6 +23,13 @@ class Citation(BaseModel):
     excerpt: str
     score: float
     facets: list[str] = Field(default_factory=list)
+
+
+class ContentSuggestion(BaseModel):
+    title: str
+    firestore_path: str
+    app_path: str
+    content_type: Literal["event", "person", "period"]
 
 
 class RetrievalDiagnostics(BaseModel):
@@ -69,6 +78,7 @@ class ChatResponse(BaseModel):
     citations: list[Citation]
     confidence: float
     related_entities: list[str] = Field(default_factory=list)
+    content_suggestions: list[ContentSuggestion] = Field(default_factory=list)
     retrieval: RetrievalDiagnostics = Field(default_factory=RetrievalDiagnostics)
 
 
@@ -98,6 +108,11 @@ class KnowledgeMetadataUpdate(BaseModel):
     related_stages: list[str] = Field(default_factory=list, max_length=100)
     related_events: list[str] = Field(default_factory=list, max_length=200)
     related_persons: list[str] = Field(default_factory=list, max_length=200)
+
+
+class GraphPropertyUpdate(BaseModel):
+    property: str = Field(min_length=1, max_length=80)
+    value: Any
 
 
 class KnowledgeIndexResponse(BaseModel):

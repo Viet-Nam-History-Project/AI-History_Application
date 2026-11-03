@@ -172,6 +172,213 @@ PROMPTS = {
 
 
 class UnifiedRagArchitectureTest(unittest.TestCase):
+    def test_content_suggestion_uses_verified_firebase_path(self):
+        plan = UnifiedPlan.from_dict({
+            "standaloneQuestion": "Sự kiện A diễn ra khi nào?",
+            "suggestionType": "event",
+        }, "question")
+        item = EvidenceItem(
+            "published:event-a",
+            "Sự kiện A diễn ra năm 1901.",
+            heading="Sự kiện A",
+            score=0.92,
+            channels=["published_content"],
+            curated=True,
+            published_content_path="periods/p/stages/s/events.json",
+            published_content_id="event-a",
+            published_content_type="event",
+        )
+
+        suggestions = GroundedRagPipeline._content_suggestions(
+            plan, [item], (item.id,), "Sự kiện A diễn ra năm 1901."
+        )
+
+        self.assertEqual(len(suggestions), 1)
+        self.assertEqual(
+            suggestions[0].firestore_path,
+            "/periods/p/stages/s/events/event-a",
+        )
+        self.assertEqual(suggestions[0].app_path, "/event/p/s/event-a")
+
+    def test_content_suggestion_rejects_unsafe_or_non_event_paths(self):
+        plan = UnifiedPlan.from_dict({
+            "standaloneQuestion": "Sự kiện nào?",
+            "suggestionType": "event",
+        }, "question")
+        unsafe = EvidenceItem(
+            "unsafe",
+            "Nội dung",
+            heading="Không an toàn",
+            published_content_path="periods/../stages/s/events.json",
+            published_content_id="event-a",
+            published_content_type="event",
+        )
+        person = EvidenceItem(
+            "person",
+            "Nội dung",
+            heading="Nhân vật",
+            published_content_path="persons/p/person-a/events.json",
+            published_content_id="event-a",
+            published_content_type="event",
+        )
+
+        self.assertEqual(
+            GroundedRagPipeline._content_suggestions(
+                plan,
+                [unsafe, person],
+                (unsafe.id, person.id),
+                "Nội dung",
+            ),
+            [],
+        )
+
+    def test_event_suggestions_exclude_lexically_similar_other_campaigns(self):
+        plan = UnifiedPlan.from_dict({
+            "standaloneQuestion": "Chiến dịch Điện Biên Phủ diễn ra như thế nào?",
+            "subject": "Chiến dịch Điện Biên Phủ",
+            "suggestionType": "event",
+        }, "question")
+
+        def event(item_id: str, title: str, score: float) -> EvidenceItem:
+            return EvidenceItem(
+                item_id,
+                title,
+                heading=title,
+                score=score,
+                published_content_path="periods/p/stages/s/events.json",
+                published_content_id=item_id,
+                published_content_type="event",
+            )
+
+        target = event(
+            "chien-thang-dien-bien-phu-1954",
+            "Chiến thắng Điện Biên Phủ (1954)",
+            0.86,
+        )
+        geneva = event("hiep-dinh-geneve-1954", "Hiệp định Genève 1954", 0.72)
+        on_air = event(
+            "dien-bien-phu-tren-khong-1972",
+            "Chiến dịch Điện Biên Phủ Trên Không 1972",
+            0.98,
+        )
+        border = event("chien-dich-bien-gioi-1950", "Chiến dịch Biên Giới 1950", 0.95)
+
+        suggestions = GroundedRagPipeline._content_suggestions(
+            plan,
+            [geneva, on_air, border, target],
+            (geneva.id, on_air.id, border.id, target.id),
+            (
+                "Chiến dịch kết thúc với chiến thắng quyết định. "
+                "Thắng lợi tạo điều kiện cho Hiệp định Genève 1954."
+            ),
+        )
+
+        self.assertEqual(
+            [item.title for item in suggestions],
+            ["Chiến thắng Điện Biên Phủ (1954)", "Hiệp định Genève 1954"],
+        )
+
+    def test_person_question_only_suggests_person_profiles(self):
+        plan = UnifiedPlan.from_dict({
+            "standaloneQuestion": "Ai là nhân vật tiêu biểu thời chống Mỹ?",
+            "suggestionType": "person",
+        }, "question")
+        event = EvidenceItem(
+            "event",
+            "Một sự kiện liên quan.",
+            heading="Một sự kiện",
+            score=0.99,
+            published_content_path="periods/p/stages/s/events.json",
+            published_content_id="event-a",
+            published_content_type="event",
+        )
+        person = EvidenceItem(
+            "person",
+            "Nguyễn Văn Trỗi là một nhân vật tiêu biểu.",
+            heading="Nguyễn Văn Trỗi",
+            score=0.75,
+            published_content_path="persons/khang-chien-chong-my/nguyen-van-troi.json",
+            published_content_id="nguyen-van-troi",
+            published_content_type="person",
+        )
+        unmentioned_person = EvidenceItem(
+            "other-person",
+            "Một nhân vật khác cũng thuộc thời kỳ.",
+            heading="Nhân vật khác",
+            score=0.98,
+            published_content_path="persons/khang-chien-chong-my/nhan-vat-khac.json",
+            published_content_id="nhan-vat-khac",
+            published_content_type="person",
+        )
+
+        suggestions = GroundedRagPipeline._content_suggestions(
+            plan,
+            [event, person, unmentioned_person],
+            (event.id,),
+            "Nhân vật tiêu biểu gồm Nguyễn Văn Trỗi.",
+        )
+
+        self.assertEqual(len(suggestions), 1)
+        self.assertEqual(suggestions[0].content_type, "person")
+        self.assertEqual(
+            suggestions[0].firestore_path,
+            "/periods_person/khang-chien-chong-my/persons/nguyen-van-troi",
+        )
+        self.assertEqual(
+            suggestions[0].app_path,
+            "/person/khang-chien-chong-my/nguyen-van-troi",
+        )
+
+    def test_none_suggestion_type_does_not_show_unrelated_content(self):
+        plan = UnifiedPlan.from_dict({
+            "standaloneQuestion": "Hãy giải thích rõ hơn.",
+            "suggestionType": "none",
+        }, "question")
+        event = EvidenceItem(
+            "event",
+            "Một sự kiện liên quan gián tiếp.",
+            heading="Một sự kiện",
+            published_content_path="periods/p/stages/s/events.json",
+            published_content_id="event-a",
+            published_content_type="event",
+        )
+
+        self.assertEqual(
+            GroundedRagPipeline._content_suggestions(
+                plan, [event], (event.id,), "Câu trả lời."
+            ),
+            [],
+        )
+
+    def test_person_suggestions_follow_answer_order_beyond_three_items(self):
+        plan = UnifiedPlan.from_dict({
+            "standaloneQuestion": "Ai là nhân vật tiêu biểu?",
+            "suggestionType": "person",
+        }, "question")
+        names = ["Nhân vật Một", "Nhân vật Hai", "Nhân vật Ba", "Nhân vật Bốn"]
+        items = [
+            EvidenceItem(
+                f"person-{index}",
+                f"Hồ sơ {name}",
+                heading=name,
+                score=1.0 - index * 0.1,
+                published_content_path=f"persons/p/person-{index}.json",
+                published_content_id=f"person-{index}",
+                published_content_type="person",
+            )
+            for index, name in enumerate(reversed(names), start=1)
+        ]
+
+        suggestions = GroundedRagPipeline._content_suggestions(
+            plan,
+            items,
+            (),
+            "Tiêu biểu gồm " + ", ".join(names) + ".",
+        )
+
+        self.assertEqual([item.title for item in suggestions], names)
+        self.assertEqual(len(suggestions), 4)
+
     def test_temporal_gate_removes_only_provably_disjoint_evidence(self):
         tools = EvidenceTools(_Client([]), "embedding", _TemporalRepository())
         plan = UnifiedPlan.from_dict({

@@ -50,13 +50,31 @@ class PublishedContentRepositoryTest(unittest.TestCase):
             }]},
         }], ensure_ascii=False).encode()
         event_path.write_bytes(payload)
+        person_relative = "v-test/persons/p/person-a.json"
+        person_path = root / person_relative
+        person_path.parent.mkdir(parents=True, exist_ok=True)
+        person_payload = json.dumps({
+            "id": "person-a", "status": "published",
+            "name": "Nhân vật A",
+            "title": "Nhân vật tiêu biểu thời kỳ P",
+            "overview": "Nhân vật A có nhiều đóng góp trong thời kỳ P.",
+            "achievements": ["Lãnh đạo hoạt động A."],
+        }, ensure_ascii=False).encode()
+        person_path.write_bytes(person_payload)
         manifest = {
             "contentVersion": "v-test",
-            "files": {"periods/p/stages/s/events.json": {
-                "url": relative,
-                "sha256": hashlib.sha256(payload).hexdigest(),
-                "size": len(payload),
-            }},
+            "files": {
+                "periods/p/stages/s/events.json": {
+                    "url": relative,
+                    "sha256": hashlib.sha256(payload).hexdigest(),
+                    "size": len(payload),
+                },
+                "persons/p/person-a.json": {
+                    "url": person_relative,
+                    "sha256": hashlib.sha256(person_payload).hexdigest(),
+                    "size": len(person_payload),
+                },
+            },
         }
         manifest_path = root / "manifest.json"
         manifest_path.write_text(json.dumps(manifest, ensure_ascii=False), encoding="utf-8")
@@ -77,6 +95,43 @@ class PublishedContentRepositoryTest(unittest.TestCase):
             self.assertIn("2/3/1901", results[0]["text"])
             self.assertEqual(results[0]["yearStart"], 1901)
             self.assertIn("published_content", results[0]["channels"])
+            self.assertEqual(
+                results[0]["publishedContentPath"],
+                "periods/p/stages/s/events.json",
+            )
+            self.assertEqual(results[0]["publishedContentId"], "event-a")
+
+    def test_search_reads_verified_person_profile(self) -> None:
+        with TemporaryDirectory() as temporary:
+            repository = PublishedContentRepository(
+                enabled=True,
+                manifest_path=str(self._manifest(Path(temporary))),
+            )
+
+            results = repository.search("Nhân vật A đóng góp gì?", 5)
+
+            person = next(
+                item for item in results
+                if item["publishedContentType"] == "person"
+            )
+            self.assertEqual(person["heading"], "Nhân vật A")
+            self.assertEqual(person["publishedContentPath"], "persons/p/person-a.json")
+
+    def test_suggestion_search_is_not_limited_by_evidence_selection(self) -> None:
+        with TemporaryDirectory() as temporary:
+            repository = PublishedContentRepository(
+                enabled=True,
+                manifest_path=str(self._manifest(Path(temporary))),
+            )
+
+            results = repository.suggest(
+                "Ai là nhân vật tiêu biểu thời kỳ P?",
+                "Những người tiêu biểu gồm Nhân vật A.",
+                "person",
+            )
+
+            self.assertEqual([item["heading"] for item in results], ["Nhân vật A"])
+            self.assertIn("published_content_suggestion", results[0]["channels"])
 
     def test_composite_promotes_matching_reviewed_content(self) -> None:
         with TemporaryDirectory() as temporary:

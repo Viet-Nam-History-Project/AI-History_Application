@@ -3,10 +3,36 @@ from datetime import datetime
 
 from neo4j.time import DateTime
 
-from src.api.neo4j_repository import _json_safe_neo4j_value, _neo4j_log_payload
+from src.api.neo4j_repository import (
+    GRAPH_PROTECTED_NODE_PROPERTIES,
+    _editable_graph_properties,
+    _json_safe_neo4j_value,
+    _neo4j_log_payload,
+    _validate_graph_property_update,
+)
 
 
 class GraphExportSerializationTest(unittest.TestCase):
+    def test_graph_property_update_accepts_neo4j_property_values(self) -> None:
+        for value in ("Hồ Chí Minh", 1954, True, ["Bác Hồ", "Nguyễn Ái Quốc"]):
+            _validate_graph_property_update("name", value)
+
+    def test_graph_property_update_rejects_nested_json(self) -> None:
+        with self.assertRaisesRegex(ValueError, "chỉ hỗ trợ"):
+            _validate_graph_property_update("metadata", {"year": 1954})
+
+    def test_graph_property_update_rejects_mixed_array(self) -> None:
+        with self.assertRaisesRegex(ValueError, "cùng kiểu"):
+            _validate_graph_property_update("aliases", ["Hồ Chí Minh", 1954])
+
+    def test_protected_fields_are_not_exposed_as_editable(self) -> None:
+        editable = _editable_graph_properties(
+            {"canonicalId": "person:ho-chi-minh", "name": "Hồ Chí Minh"},
+            GRAPH_PROTECTED_NODE_PROPERTIES,
+        )
+
+        self.assertEqual(editable, ["name"])
+
     def test_log_payload_serializes_nested_diagnostics(self) -> None:
         result = _neo4j_log_payload({
             "question": "Điện Biên Phủ diễn ra như thế nào?",

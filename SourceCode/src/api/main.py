@@ -27,6 +27,7 @@ from .index_checkpoint import (
 from .models import (
     ChatRequest,
     ChatResponse,
+    GraphPropertyUpdate,
     HealthResponse,
     KnowledgeIndexJobResponse,
     KnowledgeIndexMetadata,
@@ -871,6 +872,91 @@ def graph_search(
     _: None = Depends(require_admin_key),
 ) -> dict:
     return {"items": repository.graph_search(query, label, limit)}
+
+
+@app.get("/v1/admin/graph/relationships/search")
+def graph_relationship_search(
+    query: str = Query(default="", max_length=300),
+    relationship_type: str = Query(default="", max_length=160),
+    limit: int = Query(default=40, ge=1, le=100),
+    _: None = Depends(require_admin_key),
+) -> dict:
+    try:
+        return {
+            "items": repository.graph_relationship_search(
+                query,
+                relationship_type,
+                limit,
+            )
+        }
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.patch("/v1/admin/graph/nodes/{element_id}")
+def graph_node_update(
+    element_id: str,
+    payload: GraphPropertyUpdate,
+    _: None = Depends(require_admin_key),
+) -> dict:
+    try:
+        result = repository.update_graph_node_property(
+            element_id,
+            payload.property,
+            payload.value,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if result is None:
+        raise HTTPException(status_code=404, detail="Không tìm thấy node trong pipeline PDF.")
+    return result
+
+
+@app.delete("/v1/admin/graph/nodes/{element_id}")
+def graph_node_delete(
+    element_id: str,
+    payload: dict = Body(...),
+    _: None = Depends(require_admin_key),
+) -> dict:
+    if payload.get("confirmation") != f"DELETE_NODE:{element_id}":
+        raise HTTPException(status_code=400, detail="Mã xác nhận xóa node không chính xác.")
+    result = repository.delete_graph_node(element_id)
+    if result is None:
+        raise HTTPException(status_code=404, detail="Không tìm thấy node trong pipeline PDF.")
+    return result
+
+
+@app.patch("/v1/admin/graph/relationships/{element_id}")
+def graph_relationship_update(
+    element_id: str,
+    payload: GraphPropertyUpdate,
+    _: None = Depends(require_admin_key),
+) -> dict:
+    try:
+        result = repository.update_graph_relationship_property(
+            element_id,
+            payload.property,
+            payload.value,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if result is None:
+        raise HTTPException(status_code=404, detail="Không tìm thấy quan hệ trong pipeline PDF.")
+    return result
+
+
+@app.delete("/v1/admin/graph/relationships/{element_id}")
+def graph_relationship_delete(
+    element_id: str,
+    payload: dict = Body(...),
+    _: None = Depends(require_admin_key),
+) -> dict:
+    if payload.get("confirmation") != f"DELETE_RELATIONSHIP:{element_id}":
+        raise HTTPException(status_code=400, detail="Mã xác nhận xóa quan hệ không chính xác.")
+    result = repository.delete_graph_relationship(element_id)
+    if result is None:
+        raise HTTPException(status_code=404, detail="Không tìm thấy quan hệ trong pipeline PDF.")
+    return result
 
 
 @app.get("/v1/admin/graph/export")

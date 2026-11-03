@@ -147,6 +147,31 @@ def _event_text(record: dict[str, Any]) -> str:
     return "\n".join(dict.fromkeys(line for line in lines if line))
 
 
+def _person_text(record: dict[str, Any], period_slug: str) -> str:
+    name = str(record.get("name") or record.get("title") or "").strip()
+    parts = [
+        f"Bản ghi nhân vật: {name}.",
+        f"Thời kỳ trong ứng dụng: {period_slug.replace('-', ' ')}.",
+    ]
+    for field in (
+        "title", "overview", "birthDate", "deathDate", "birth_year",
+        "death_year", "hometown", "achievements", "lifetime",
+    ):
+        parts.extend(_flatten(record.get(field), field))
+    return "\n".join(dict.fromkeys(part for part in parts if part))
+
+
+def _period_text(record: dict[str, Any]) -> str:
+    title = str(record.get("title") or record.get("name") or "").strip()
+    parts = [f"Bản ghi thời kỳ: {title}."]
+    for field in (
+        "smallTitle", "summary", "description", "startDate", "endDate",
+        "overview", "content",
+    ):
+        parts.extend(_flatten(record.get(field), field))
+    return "\n".join(dict.fromkeys(part for part in parts if part))
+
+
 @dataclass(frozen=True, slots=True)
 class _Snapshot:
     version: str
@@ -195,9 +220,14 @@ class PublishedContentRepository:
     @staticmethod
     def _eligible_file(logical_path: str) -> bool:
         return (
-            logical_path.startswith("periods/")
-            and logical_path.endswith("/events.json")
-            and "/persons/" not in logical_path
+            logical_path == "periods.json"
+            or (
+                logical_path.startswith("periods/")
+                and logical_path.endswith("/events.json")
+            )
+            or bool(re.fullmatch(
+                r"persons/[^/]+/[^/]+\.json", logical_path
+            )) and not logical_path.endswith("/index.json")
         )
 
     def _file_location(self, manifest_location: str, relative_url: str) -> str:
@@ -229,19 +259,30 @@ class PublishedContentRepository:
             if hashlib.sha256(payload).hexdigest() != expected_hash:
                 raise ValueError(f"Hash mismatch for {logical_path}")
             decoded = json.loads(payload)
-            if not isinstance(decoded, list):
-                continue
-            for record in decoded:
+            decoded_records = decoded if isinstance(decoded, list) else [decoded]
+            for record in decoded_records:
                 if not isinstance(record, dict) or record.get("status") != "published":
                     continue
-                text = _event_text(record)
+                path_parts = str(logical_path).strip("/").split("/")
+                if logical_path == "periods.json":
+                    content_type = "period"
+                    text = _period_text(record)
+                    heading = str(record.get("title") or record.get("name") or "")
+                elif path_parts[0] == "persons":
+                    content_type = "person"
+                    text = _person_text(record, path_parts[1])
+                    heading = str(record.get("name") or record.get("title") or "")
+                else:
+                    content_type = "event"
+                    text = _event_text(record)
+                    heading = str(record.get("title") or "")
                 if not text:
                     continue
                 record_id = str(record.get("id") or record.get("slug") or "")
                 records.append({
                     "id": f"published:{logical_path}:{record_id}",
                     "text": text,
-                    "heading": str(record.get("title") or ""),
+                    "heading": heading,
                     "sequence": int(record.get("sortOrder") or 0),
                     "pageStart": None,
                     "pageEnd": None,
@@ -256,6 +297,13 @@ class PublishedContentRepository:
                     "relatedEntities": [],
                     "relatedEntityIds": [],
                     "publishedContentPath": str(logical_path),
+                    "publishedContentId": record_id,
+                    "publishedContentType": content_type,
+                    "publishedContentContext": (
+                        path_parts[1]
+                        if content_type in {"person", "event"}
+                        else record_id
+                    ),
                 })
         return _Snapshot(version, time.monotonic(), tuple(records))
 
@@ -292,19 +340,38 @@ class PublishedContentRepository:
             f"{record.get('heading') or ''} {record.get('text') or ''}"
         )
         heading_key = normalize_search_key(record.get("heading") or "")
+        context_key = normalize_search_key(
+            record.get("publishedContentContext") or ""
+        )
         hits = sum(token in text_key for token in query_tokens)
         title_hits = sum(token in heading_key for token in query_tokens)
+        context_hits = sum(token in context_key for token in query_tokens)
         coverage = hits / len(query_tokens)
         title_coverage = title_hits / len(query_tokens)
+        context_coverage = context_hits / len(query_tokens)
         subject_phrase = " ".join(query_tokens[: min(5, len(query_tokens))])
         phrase_bonus = 0.12 if subject_phrase and subject_phrase in text_key else 0.0
         if hits < 2 or coverage < 0.28:
             return 0.0
-        return min(1.0, 0.72 * coverage + 0.20 * title_coverage + phrase_bonus)
+        return min(
+            1.0,
+            0.72 * coverage
+            + 0.20 * title_coverage
+            + 0.12 * context_coverage
+            + phrase_bonus,
+        )
 
-    def search(self, question: str, limit: int) -> list[dict[str, Any]]:
+    def search(
+        self,
+        question: str,
+        limit: int,
+        *,
+        content_type: str = "",
+    ) -> list[dict[str, Any]]:
         ranked: list[dict[str, Any]] = []
         for original in self._records():
+            if content_type and original.get("publishedContentType") != content_type:
+                continue
             score = self._score(question, original)
             if score <= 0:
                 continue
@@ -323,6 +390,47 @@ class PublishedContentRepository:
             reverse=True,
         )
         return ranked[: max(1, int(limit))]
+
+    def suggest(
+        self,
+        question: str,
+        answer: str,
+        content_type: str,
+        *,
+        limit: int = 12,
+    ) -> list[dict[str, Any]]:
+        """Find every published item explicitly named in an answer.
+
+        This query is separate from the bounded evidence candidate window: a
+        long answer can mention more app records than are needed to prove its
+        claims, and those records should still remain navigable.
+        """
+        normalized_answer = normalize_search_key(answer)
+        ranked: list[tuple[int, float, dict[str, Any]]] = []
+        for original in self._records():
+            if original.get("publishedContentType") != content_type:
+                continue
+            heading = normalize_search_key(original.get("heading") or "")
+            mention_position = normalized_answer.find(heading) if heading else -1
+            score = self._score(question, original)
+            if mention_position < 0 and score <= 0:
+                continue
+            item = dict(original)
+            item.update({
+                "score": round(score, 6),
+                "publishedContentScore": round(score, 6),
+                "channels": ["published_content_suggestion"],
+                "directEvidence": False,
+                "entityMatch": mention_position >= 0,
+                "matchedPhrases": [item["heading"]] if mention_position >= 0 else [],
+            })
+            ranked.append((
+                mention_position if mention_position >= 0 else 1_000_000_000,
+                -score,
+                item,
+            ))
+        ranked.sort(key=lambda entry: (entry[0], entry[1]))
+        return [item for _, _, item in ranked[: max(1, int(limit))]]
 
     def retrieve_hybrid(
         self,

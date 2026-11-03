@@ -109,6 +109,7 @@ class UnifiedPlan:
     output_style: str = "direct"
     requires_verification: bool = False
     ambiguity: str = ""
+    suggestion_type: str = "none"
 
     @classmethod
     def from_dict(cls, value: dict[str, Any], original: str) -> "UnifiedPlan":
@@ -128,6 +129,9 @@ class UnifiedPlan:
         mode = str(value.get("mode") or "explanatory_rag")
         if mode not in RAG_MODES:
             mode = "explanatory_rag"
+        suggestion_type = str(value.get("suggestionType") or "none").strip()
+        if suggestion_type not in {"person", "event", "period", "none"}:
+            suggestion_type = "none"
         queries = tuple(dict.fromkeys(
             str(item).strip()
             for item in (value.get("retrievalQueries") or [])[:12]
@@ -172,6 +176,7 @@ class UnifiedPlan:
             output_style=str(value.get("outputStyle") or "direct").strip(),
             requires_verification=bool(value.get("requiresVerification")),
             ambiguity=str(value.get("ambiguity") or "").strip(),
+            suggestion_type=suggestion_type,
         )
 
 
@@ -193,6 +198,9 @@ class EvidenceItem:
     curated: bool = False
     year_start: int | None = None
     year_end: int | None = None
+    published_content_path: str = ""
+    published_content_id: str = ""
+    published_content_type: str = ""
 
     @classmethod
     def from_record(cls, value: dict[str, Any]) -> "EvidenceItem | None":
@@ -220,6 +228,15 @@ class EvidenceItem:
             ),
             year_start=value.get("yearStart") if isinstance(value.get("yearStart"), int) else None,
             year_end=value.get("yearEnd") if isinstance(value.get("yearEnd"), int) else None,
+            published_content_path=str(
+                value.get("publishedContentPath") or ""
+            ).strip(),
+            published_content_id=str(
+                value.get("publishedContentId") or ""
+            ).strip(),
+            published_content_type=str(
+                value.get("publishedContentType") or ""
+            ).strip(),
         )
 
     def overlaps(self, start: int, end: int) -> bool | None:

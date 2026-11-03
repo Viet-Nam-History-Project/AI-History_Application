@@ -28,6 +28,10 @@ PLAN_SCHEMA = {
                     ],
                 },
                 "subject": {"type": "string"},
+                "suggestionType": {
+                    "type": "string",
+                    "enum": ["person", "event", "period", "none"],
+                },
                 "requirements": {
                     "type": "array",
                     "minItems": 1,
@@ -82,7 +86,7 @@ PLAN_SCHEMA = {
                 "standaloneQuestion", "mode", "subject", "requirements",
                 "retrievalQueries", "scope", "dateRange", "outputStyle",
                 "yearStart", "yearEnd", "timeWindows", "requiresVerification",
-                "ambiguity",
+                "ambiguity", "suggestionType",
             ],
         },
     },
@@ -161,6 +165,11 @@ NHIỆM VỤ:
 - `requiresVerification=true` khi câu trả lời dự kiến chứa tên người, mốc ngày,
   số liệu, quan hệ nhân quả, so sánh, nhiều nguồn hoặc khả năng xung đột.
 - Chọn outputStyle theo bản chất câu hỏi, không theo một taxonomy nội dung cứng.
+- Chọn `suggestionType` theo loại màn hình nội dung hữu ích nhất để người dùng
+  đọc tiếp trong App: `person` khi trọng tâm là một hay nhiều nhân vật; `event`
+  khi trọng tâm là sự kiện/chiến dịch/trận đánh; `period` khi trọng tâm là cả
+  thời kỳ/giai đoạn; `none` khi không nên gợi ý điều hướng. Chọn theo ý định
+  câu hỏi, không chọn theo loại đoạn bằng chứng tình cờ được truy xuất.
 
 Chỉ dẫn chuẩn hóa của Admin:
 {instructions['query_normalization']}
@@ -189,6 +198,14 @@ Câu hỏi hiện tại: {question}
             # The fallback is intentionally only a transport fallback, not a
             # second semantic planner made from historical regex rules.
             verify = bool(re.search(r"\d|ai |người|khi nào|bao nhiêu", question, re.I))
+            if re.search(r"\b(ai|nhân vật|người|lãnh đạo|chỉ huy)\b", question, re.I):
+                suggestion_type = "person"
+            elif re.search(r"\b(giai đoạn|thời kỳ|thời đại)\b", question, re.I):
+                suggestion_type = "period"
+            elif re.search(r"\b(sự kiện|chiến dịch|trận|khởi nghĩa)\b", question, re.I):
+                suggestion_type = "event"
+            else:
+                suggestion_type = "none"
             return UnifiedPlan.from_dict({
                 "standaloneQuestion": question,
                 "mode": "explanatory_rag",
@@ -201,4 +218,5 @@ Câu hỏi hiện tại: {question}
                 "yearStart": None,
                 "yearEnd": None,
                 "timeWindows": [],
+                "suggestionType": suggestion_type,
             }, question)

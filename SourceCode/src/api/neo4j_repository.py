@@ -38,6 +38,72 @@ PDF_GRAPH_LABELS = frozenset({
     "AIConfig",
 })
 
+GRAPH_PROTECTED_NODE_PROPERTIES = frozenset({
+    "canonicalId",
+    "chunkId",
+    "contentHash",
+    "createdAt",
+    "embedding",
+    "embeddingModel",
+    "fileHash",
+    "graphEditedAt",
+    "id",
+    "indexedAt",
+    "key",
+    "pageId",
+    "pipeline",
+    "sourceId",
+    "storagePath",
+    "updatedAt",
+})
+
+GRAPH_PROTECTED_RELATIONSHIP_PROPERTIES = frozenset({
+    "createdAt",
+    "graphEditedAt",
+    "pipeline",
+    "sourceChunkId",
+    "updatedAt",
+})
+
+
+def _validate_graph_property_update(property_name: str, value: Any) -> None:
+    """Validate a value before passing it to Neo4j as a property."""
+    if not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]{0,79}", property_name):
+        raise ValueError("Tên thuộc tính graph không hợp lệ.")
+    if value is None:
+        raise ValueError("Không thể đặt giá trị null; hãy nhập một giá trị JSON hợp lệ.")
+    if isinstance(value, str):
+        if len(value) > 200_000:
+            raise ValueError("Giá trị chuỗi vượt quá 200.000 ký tự.")
+        return
+    if isinstance(value, (bool, int, float)):
+        return
+    if isinstance(value, list):
+        if len(value) > 10_000:
+            raise ValueError("Danh sách vượt quá 10.000 phần tử.")
+        if not all(isinstance(item, (str, bool, int, float)) for item in value):
+            raise ValueError("Neo4j chỉ cho phép mảng gồm chuỗi, số hoặc boolean.")
+        value_types = {
+            "number" if isinstance(item, (int, float)) and not isinstance(item, bool)
+            else type(item).__name__
+            for item in value
+        }
+        if len(value_types) > 1:
+            raise ValueError("Các phần tử trong mảng Neo4j phải cùng kiểu dữ liệu.")
+        return
+    raise ValueError("Giá trị graph chỉ hỗ trợ chuỗi, số, boolean hoặc mảng đơn.")
+
+
+def _editable_graph_properties(
+    properties: dict[str, Any],
+    protected: frozenset[str],
+) -> list[str]:
+    return sorted(
+        key
+        for key in properties
+        if key not in protected and re.fullmatch(r"[A-Za-z][A-Za-z0-9_]{0,79}", key)
+    )
+
 
 def _json_safe_neo4j_value(value: Any, include_embeddings: bool = False) -> Any:
     """Convert Neo4j values to JSON-safe data without exposing vector payloads."""
@@ -1383,19 +1449,23 @@ class Neo4jKnowledgeRepository:
                 OPTIONAL MATCH (node)-[relation]-(related)
                 WHERE any(item IN labels(related) WHERE item IN $allowedLabels)
                   AND (NOT related:Entity OR related.pipeline = 'pdf')
-                RETURN coalesce(node.id, node.canonicalId, elementId(node)) AS id,
+                RETURN elementId(node) AS elementId,
+                       coalesce(node.id, node.canonicalId, elementId(node)) AS id,
                        labels(node) AS labels,
                        coalesce(node.title, node.name, node.sourceTitle, node.id) AS title,
                        properties(node) AS properties,
                        [item IN collect(DISTINCT CASE
                           WHEN relation IS NULL THEN NULL
                           ELSE {
+                            elementId: elementId(relation),
                             type: type(relation),
                             direction: CASE WHEN startNode(relation) = node THEN 'out' ELSE 'in' END,
                             relatedId: coalesce(related.id, related.canonicalId),
                             relatedTitle: coalesce(
-                              related.title, related.name, related.sourceTitle, related.id
-                            )
+                              related.title, related.name, related.sourceTitle, related.id,
+                              related.canonicalId, elementId(related)
+                            ),
+                            properties: properties(relation)
                           }
                         END) WHERE item IS NOT NULL][0..12] AS relationships
                 ORDER BY title
@@ -1407,7 +1477,320 @@ class Neo4jKnowledgeRepository:
                 allowedLabels=sorted(PDF_GRAPH_LABELS),
                 limit=max(1, min(limit, 100)),
             )
-            return [_json_safe_neo4j_value(record.data()) for record in records]
+            items = []
+            for record in records:
+                item = _json_safe_neo4j_value(record.data())
+                item["editableProperties"] = _editable_graph_properties(
+                    item["properties"], GRAPH_PROTECTED_NODE_PROPERTIES
+                )
+                for relation in item["relationships"]:
+                    relation["editableProperties"] = _editable_graph_properties(
+                        relation["properties"],
+                        GRAPH_PROTECTED_RELATIONSHIP_PROPERTIES,
+                    )
+                items.append(item)
+            return items
+
+    def graph_relationship_search(
+        self,
+        query: str,
+        relationship_type: str = "",
+        limit: int = 40,
+    ) -> list[dict]:
+        selected_type = relationship_type.strip()
+        visible_types = {
+            str(item["type"])
+            for item in self.graph_summary()["relationships"]
+        }
+        if selected_type and selected_type not in visible_types:
+            raise ValueError("Loại quan hệ không thuộc pipeline PDF mới.")
+
+        with self.driver.session(database=self.database) as session:
+            records = session.run(
+                """
+                MATCH (source)-[relation]->(target)
+                WHERE any(label IN labels(source) WHERE label IN $allowedLabels)
+                  AND any(label IN labels(target) WHERE label IN $allowedLabels)
+                  AND (NOT source:Entity OR source.pipeline = 'pdf')
+                  AND (NOT target:Entity OR target.pipeline = 'pdf')
+                  AND ($relationshipType = '' OR type(relation) = $relationshipType)
+                  AND ($searchQuery = ''
+                    OR toLower(type(relation)) CONTAINS toLower($searchQuery)
+                    OR toLower(coalesce(
+                      properties(relation)[$rawTypeProperty], ''
+                    )) CONTAINS toLower($searchQuery)
+                    OR toLower(coalesce(
+                      source.title, source.name, source.sourceTitle,
+                      source.id, source.canonicalId, ''
+                    )) CONTAINS toLower($searchQuery)
+                    OR toLower(coalesce(
+                      target.title, target.name, target.sourceTitle,
+                      target.id, target.canonicalId, ''
+                    )) CONTAINS toLower($searchQuery))
+                RETURN elementId(relation) AS elementId,
+                       type(relation) AS type,
+                       properties(relation) AS properties,
+                       {
+                         elementId: elementId(source),
+                         id: coalesce(source.id, source.canonicalId, elementId(source)),
+                         labels: labels(source),
+                         title: coalesce(
+                           source.title, source.name, source.sourceTitle,
+                           source.id, source.canonicalId, elementId(source)
+                         )
+                       } AS source,
+                       {
+                         elementId: elementId(target),
+                         id: coalesce(target.id, target.canonicalId, elementId(target)),
+                         labels: labels(target),
+                         title: coalesce(
+                           target.title, target.name, target.sourceTitle,
+                           target.id, target.canonicalId, elementId(target)
+                         )
+                       } AS target
+                ORDER BY type, source.title, target.title
+                LIMIT $limit
+                """,
+                searchQuery=query.strip(),
+                relationshipType=selected_type,
+                rawTypeProperty="rawType",
+                allowedLabels=sorted(PDF_GRAPH_LABELS),
+                limit=max(1, min(limit, 100)),
+            )
+            items = []
+            for record in records:
+                item = _json_safe_neo4j_value(record.data())
+                item["editableProperties"] = _editable_graph_properties(
+                    item["properties"],
+                    GRAPH_PROTECTED_RELATIONSHIP_PROPERTIES,
+                )
+                items.append(item)
+            return items
+
+    def update_graph_node_property(
+        self,
+        element_id: str,
+        property_name: str,
+        value: Any,
+    ) -> dict[str, Any] | None:
+        if property_name in GRAPH_PROTECTED_NODE_PROPERTIES:
+            raise ValueError(f"Thuộc tính {property_name} là khóa hệ thống và không thể sửa.")
+        _validate_graph_property_update(property_name, value)
+
+        with self.driver.session(database=self.database) as session:
+            current = session.run(
+                """
+                MATCH (node)
+                WHERE elementId(node) = $elementId
+                  AND any(label IN labels(node) WHERE label IN $allowedLabels)
+                  AND (NOT node:Entity OR node.pipeline = 'pdf')
+                RETURN labels(node) AS labels, properties(node) AS properties
+                """,
+                elementId=element_id,
+                allowedLabels=sorted(PDF_GRAPH_LABELS),
+            ).single()
+            if current is None:
+                return None
+
+            current_properties = dict(current["properties"])
+            if property_name not in current_properties:
+                raise ValueError(
+                    f"Thuộc tính {property_name} không tồn tại trên node này."
+                )
+            before_value = _json_safe_neo4j_value(current_properties[property_name])
+            updates: dict[str, Any] = {property_name: value}
+
+            if "Entity" in current["labels"] and property_name in {
+                "name", "aliases", "surfaceForms"
+            }:
+                merged = {**current_properties, property_name: value}
+                candidate_names = [str(merged.get("name") or "")]
+                for list_key in ("aliases", "surfaceForms"):
+                    list_value = merged.get(list_key)
+                    if isinstance(list_value, (list, tuple)):
+                        candidate_names.extend(str(item) for item in list_value)
+                candidate_names.extend(expand_known_entity_aliases(candidate_names[0]))
+                updates["searchKeys"] = sorted({
+                    normalized
+                    for candidate in candidate_names
+                    if (normalized := normalize_search_key(candidate))
+                })
+
+            updated = session.run(
+                """
+                MATCH (node)
+                WHERE elementId(node) = $elementId
+                  AND any(label IN labels(node) WHERE label IN $allowedLabels)
+                  AND (NOT node:Entity OR node.pipeline = 'pdf')
+                SET node += $updates,
+                    node.graphEditedAt = datetime()
+                RETURN elementId(node) AS elementId,
+                       coalesce(node.id, node.canonicalId, elementId(node)) AS id,
+                       labels(node) AS labels,
+                       coalesce(
+                         node.title, node.name, node.sourceTitle,
+                         node.id, node.canonicalId, elementId(node)
+                       ) AS title,
+                       properties(node) AS properties
+                """,
+                elementId=element_id,
+                allowedLabels=sorted(PDF_GRAPH_LABELS),
+                updates=updates,
+            ).single()
+            if updated is None:
+                return None
+            item = _json_safe_neo4j_value(updated.data())
+            item["editableProperties"] = _editable_graph_properties(
+                item["properties"], GRAPH_PROTECTED_NODE_PROPERTIES
+            )
+            return {"item": item, "beforeValue": before_value}
+
+    def delete_graph_node(self, element_id: str) -> dict[str, Any] | None:
+        with self.driver.session(database=self.database) as session:
+            current = session.run(
+                """
+                MATCH (node)
+                WHERE elementId(node) = $elementId
+                  AND any(label IN labels(node) WHERE label IN $allowedLabels)
+                  AND (NOT node:Entity OR node.pipeline = 'pdf')
+                OPTIONAL MATCH (node)-[relation]-()
+                RETURN elementId(node) AS elementId,
+                       labels(node) AS labels,
+                       coalesce(
+                         node.title, node.name, node.sourceTitle,
+                         node.id, node.canonicalId, elementId(node)
+                       ) AS title,
+                       count(DISTINCT relation) AS relationshipCount
+                """,
+                elementId=element_id,
+                allowedLabels=sorted(PDF_GRAPH_LABELS),
+            ).single()
+            if current is None:
+                return None
+            deleted = _json_safe_neo4j_value(current.data())
+            result = session.run(
+                """
+                MATCH (node)
+                WHERE elementId(node) = $elementId
+                  AND any(label IN labels(node) WHERE label IN $allowedLabels)
+                  AND (NOT node:Entity OR node.pipeline = 'pdf')
+                DETACH DELETE node
+                RETURN count(*) AS deletedCount
+                """,
+                elementId=element_id,
+                allowedLabels=sorted(PDF_GRAPH_LABELS),
+            ).single()
+            if not result or int(result["deletedCount"] or 0) != 1:
+                return None
+            return {"deleted": deleted}
+
+    def update_graph_relationship_property(
+        self,
+        element_id: str,
+        property_name: str,
+        value: Any,
+    ) -> dict[str, Any] | None:
+        if property_name in GRAPH_PROTECTED_RELATIONSHIP_PROPERTIES:
+            raise ValueError(f"Thuộc tính {property_name} là khóa hệ thống và không thể sửa.")
+        _validate_graph_property_update(property_name, value)
+
+        with self.driver.session(database=self.database) as session:
+            current = session.run(
+                """
+                MATCH (source)-[relation]->(target)
+                WHERE elementId(relation) = $elementId
+                  AND any(label IN labels(source) WHERE label IN $allowedLabels)
+                  AND any(label IN labels(target) WHERE label IN $allowedLabels)
+                  AND (NOT source:Entity OR source.pipeline = 'pdf')
+                  AND (NOT target:Entity OR target.pipeline = 'pdf')
+                RETURN properties(relation) AS properties
+                """,
+                elementId=element_id,
+                allowedLabels=sorted(PDF_GRAPH_LABELS),
+            ).single()
+            if current is None:
+                return None
+            current_properties = dict(current["properties"])
+            if property_name not in current_properties:
+                raise ValueError(
+                    f"Thuộc tính {property_name} không tồn tại trên quan hệ này."
+                )
+            before_value = _json_safe_neo4j_value(current_properties[property_name])
+            updated = session.run(
+                """
+                MATCH (source)-[relation]->(target)
+                WHERE elementId(relation) = $elementId
+                  AND any(label IN labels(source) WHERE label IN $allowedLabels)
+                  AND any(label IN labels(target) WHERE label IN $allowedLabels)
+                  AND (NOT source:Entity OR source.pipeline = 'pdf')
+                  AND (NOT target:Entity OR target.pipeline = 'pdf')
+                SET relation += $updates,
+                    relation.graphEditedAt = datetime()
+                RETURN elementId(relation) AS elementId,
+                       type(relation) AS type,
+                       properties(relation) AS properties,
+                       {
+                         elementId: elementId(source),
+                         id: coalesce(source.id, source.canonicalId, elementId(source)),
+                         labels: labels(source),
+                         title: coalesce(
+                           source.title, source.name, source.sourceTitle,
+                           source.id, source.canonicalId, elementId(source)
+                         )
+                       } AS source,
+                       {
+                         elementId: elementId(target),
+                         id: coalesce(target.id, target.canonicalId, elementId(target)),
+                         labels: labels(target),
+                         title: coalesce(
+                           target.title, target.name, target.sourceTitle,
+                           target.id, target.canonicalId, elementId(target)
+                         )
+                       } AS target
+                """,
+                elementId=element_id,
+                allowedLabels=sorted(PDF_GRAPH_LABELS),
+                updates={property_name: value},
+            ).single()
+            if updated is None:
+                return None
+            item = _json_safe_neo4j_value(updated.data())
+            item["editableProperties"] = _editable_graph_properties(
+                item["properties"], GRAPH_PROTECTED_RELATIONSHIP_PROPERTIES
+            )
+            return {"item": item, "beforeValue": before_value}
+
+    def delete_graph_relationship(self, element_id: str) -> dict[str, Any] | None:
+        with self.driver.session(database=self.database) as session:
+            deleted = session.run(
+                """
+                MATCH (source)-[relation]->(target)
+                WHERE elementId(relation) = $elementId
+                  AND any(label IN labels(source) WHERE label IN $allowedLabels)
+                  AND any(label IN labels(target) WHERE label IN $allowedLabels)
+                  AND (NOT source:Entity OR source.pipeline = 'pdf')
+                  AND (NOT target:Entity OR target.pipeline = 'pdf')
+                WITH relation, source, target, {
+                  elementId: elementId(relation),
+                  type: type(relation),
+                  sourceTitle: coalesce(
+                    source.title, source.name, source.sourceTitle,
+                    source.id, source.canonicalId, elementId(source)
+                  ),
+                  targetTitle: coalesce(
+                    target.title, target.name, target.sourceTitle,
+                    target.id, target.canonicalId, elementId(target)
+                  )
+                } AS deleted
+                DELETE relation
+                RETURN deleted
+                """,
+                elementId=element_id,
+                allowedLabels=sorted(PDF_GRAPH_LABELS),
+            ).single()
+            if deleted is None:
+                return None
+            return {"deleted": _json_safe_neo4j_value(deleted["deleted"])}
 
     def legacy_graph_preview(self) -> dict[str, int]:
         with self.driver.session(database=self.database) as session:
